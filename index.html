@@ -3,48 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Offline Flashcards</title>
+    <title>Pro Flashcards SRS</title>
     
+    <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="styles/main.css">
-    
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
 </head>
 <body>
-    <div id="app">
-        <header>
-            <h1>My Flashcards</h1>
-            <div class="sync-controls">
-                <button id="sync-btn">Sync with Server</button>
-            </div>  
-        </header>
+    <header class="top-nav">
+        <div class="nav-left">
+            <h2 id="breadcrumb-trail">
+                <span class="crumb" onclick="goHome()">Home</span>
+            </h2>
+        </div>
+        <div class="nav-right">
+            <button id="sync-btn" class="primary-btn">Sync with Server</button>
+        </div>
+    </header>
 
-        <main>
-            <section class="card-creation-area">
-                <h2>Add a New Card</h2>
-                <form id="add-card-form">
-                    <div class="input-group">
-                        <label for="question">Question:</label>
-                        <input type="text" id="question" required placeholder="e.g., What is a UUID?">
-                    </div>
-                    
-                    <div class="input-group">
-                        <label for="answer">Answer:</label>
-                        <input type="text" id="answer" required placeholder="e.g., A universally unique identifier">
-                    </div>
-                    
-                    <button type="submit">Save Flashcard</button>
-                </form>
-            </section>
+    <main id="app-container">
+        
+        <section id="view-hub" class="active-view">
+            <div class="action-bar">
+                <button id="new-folder-btn">+ New Folder</button>
+                <button id="new-deck-btn" class="primary-btn">+ New Deck</button>
+            </div>
+            
+            <div class="grid-container">
+                <p class="empty-state" id="hub-empty-state">No decks or folders here yet.</p>
+                <div id="item-grid" class="item-grid"></div>
+            </div>
+        </section>
 
-            <hr>
 
-            <section class="card-display-area">
-                <h2>My Deck</h2>
-                <div id="flashcard-container">
-                    <p>No flashcards yet. Add one above!</p>
+        <section id="view-studio" class="hidden">
+            <div class="studio-header">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button id="btn-back-hub">← Back</button>
+                    <h1 id="studio-deck-title">Deck Name</h1>
+                    <button id="btn-rename-deck" style="background: none; border: none; font-size: 1.2rem;" title="Rename Deck">✏️</button>
+                    <button id="btn-delete-deck" style="background: none; border: none; font-size: 1.2rem;" title="Delete Deck">🗑️</button>
                 </div>
-            </section>
-        </main>
+                
+                <div class="studio-actions" style="display: flex; gap: 10px; align-items: center;">
+                    <select id="review-order-select" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc;">
+                        <option value="mixed">🔀 Mixed</option>
+                        <option value="ordered">⬇️ Ordered</option>
+                        <option value="reverse">⬆️ Reverse</option>
+                    </select>
+                    
+                    <button id="toggle-session-btn" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;" title="Toggle Reminders">🔔 Active</button>
+                    <button id="flip-all-btn" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;" title="Swap all Questions and Answers">🔄 Swap Q/A</button>
+
+                    <button id="start-review-btn" class="success-btn">Start Review</button>
+                    <button id="add-card-btn" class="primary-btn">Add Card</button>
+                </div>
+            </div>
+
+            <div class="stats-dashboard">
+                <div class="stat-box">Total Cards: <span id="stat-total">0</span></div>
+                <div class="stat-box">Due Today: <span id="stat-due">0</span></div>
+                <div class="stat-box">Next Session: <span id="stat-next">-</span></div>
+            </div>
+
+            <div class="card-list-container">
+                <div class="search-bar">
+                    <input type="text" id="search-cards" placeholder="Search cards...">
+                </div>
+                <div id="card-list" class="scrollable-list">
+                    </div>
+            </div>
+        </section>
+
+
+        <section id="view-focus" class="hidden">
+            <div class="focus-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span id="focus-progress" style="font-weight: bold; font-size: 1.2rem;">Card 1 / 20</span>
+                <button id="exit-review-btn" class="danger-btn">End Session</button>
+            </div>
+            
+            <progress id="focus-progress-bar" value="0" max="100" style="width: 100%; height: 12px; margin-bottom: 30px; border-radius: 5px;"></progress>
+
+            <div class="flashcard-stage">
+
+            <div class="flashcard-stage">
+                <div id="active-card" class="giant-card">
+                    <div id="card-question" class="card-text">Question goes here...</div>
+                    <hr id="card-divider" class="hidden">
+                    <div id="card-answer" class="card-text hidden">Answer goes here...</div>
+                </div>
+            </div>
+
+            <div id="focus-controls" class="hidden">
+                <p class="hint-text">Did you get it right?</p>
+                <button id="btn-wrong" class="danger-btn">No (Left Arrow)</button>
+                <button id="btn-right" class="success-btn">Yes (Right Arrow)</button>
+            </div>
+            
+            <div id="flip-hint">
+                <p class="hint-text">Press Spacebar or Click to flip</p>
+            </div>
+        </section>
+
+    </main>
+
+    <div id="card-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="modal-title">Add New Card</h2>
+            <textarea id="modal-q" placeholder="Question (Multi-line supported)"></textarea>
+            <textarea id="modal-a" placeholder="Answer (Multi-line supported)"></textarea>
+            <div class="modal-actions">
+                <button id="modal-cancel">Cancel</button>
+                <button id="modal-save" class="primary-btn">Save</button>
+            </div>
+        </div>
     </div>
 
     <script src="src/database.js"></script>

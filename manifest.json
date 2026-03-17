@@ -1,0 +1,15 @@
+{
+  "name": "Offline Flashcards",
+  "short_name": "Flashcards",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f4f7f6",
+  "theme_color": "#007bff",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2641/2641409.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
