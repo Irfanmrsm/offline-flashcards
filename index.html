@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Flashcards</title>
+    
+    <link rel="stylesheet" href="styles/main.css">
+    
+    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>My Flashcards</h1>
+            <div class="sync-controls">
+                <button id="export-btn">Export Changes</button>
+                <button id="import-btn">Import Changes</button>
+                <input type="file" id="import-file-input" accept=".json" style="display: none;">
+            </div>  
+        </header>
+
+        <main>
+            <section class="card-creation-area">
+                <h2>Add a New Card</h2>
+                <form id="add-card-form">
+                    <div class="input-group">
+                        <label for="question">Question:</label>
+                        <input type="text" id="question" required placeholder="e.g., What is a UUID?">
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="answer">Answer:</label>
+                        <input type="text" id="answer" required placeholder="e.g., A universally unique identifier">
+                    </div>
+                    
+                    <button type="submit">Save Flashcard</button>
+                </form>
+            </section>
+
+            <hr>
+
+            <section class="card-display-area">
+                <h2>My Deck</h2>
+                <div id="flashcard-container">
+                    <p>No flashcards yet. Add one above!</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="src/database.js"></script>
+    <script src="src/app.js"></script>
+</body>
+</html>
