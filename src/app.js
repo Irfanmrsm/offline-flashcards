@@ -237,3 +237,61 @@ async function processImport(jsonString) {
         alert("Invalid sync file.");
     }
 }
+
+// --- NEW AUTOMATED XAMPP SYNC LOGIC ---
+
+const syncBtn = document.getElementById('sync-btn');
+
+syncBtn.addEventListener('click', async () => {
+    syncBtn.innerText = "Syncing...";
+    
+    try {
+        // 1. Gather local changes
+        const unsyncedLogs = await db.changelog.where('synced').equals(0).toArray();
+        const changedIds = [...new Set(unsyncedLogs.map(log => log.flashcard_id))];
+        const cardsToSync = await Promise.all(changedIds.map(id => db.flashcards.get(id)));
+        const validCards = cardsToSync.filter(card => card !== undefined);
+
+        // 2. Send changes to XAMPP (PHP)
+        const response = await fetch('http://localhost/flashcards/sync.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(validCards)
+        });
+
+        if (!response.ok) throw new Error("Server error");
+        
+        // 3. Get the latest data back from the server
+        const serverCards = await response.json();
+
+        // 4. Update the local IndexedDB with the server's data
+        for (const incoming of serverCards) {
+            const local = await db.flashcards.get(incoming.id);
+
+            if (!local || incoming.last_modified > local.last_modified) {
+                await db.flashcards.put(incoming);
+                // Mark as synced so we don't send it back unnecessarily 
+                await db.changelog.add({
+                    flashcard_id: incoming.id,
+                    operation: incoming.deleted ? 'DELETE' : 'UPDATE',
+                    timestamp: Date.now(),
+                    synced: 1 
+                });
+            }
+        }
+
+        // 5. Mark our original local changes as successfully synced
+        for (const log of unsyncedLogs) {
+            await db.changelog.update(log.log_id, { synced: 1 });
+        }
+
+        loadFlashcards();
+        alert("Sync complete!");
+
+    } catch (error) {
+        console.error("Sync failed:", error);
+        alert("Could not connect to XAMPP server.");
+    } finally {
+        syncBtn.innerText = "Sync with Server";
+    }
+});
