@@ -2,54 +2,59 @@
 // sync.php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
-// Connect to MySQL
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit;
+
 $conn = new mysqli('localhost', 'root', '', 'flashcard_app');
 if ($conn->connect_error) {
-    die(json_encode(['error' => 'Database connection failed']));
+    die(json_encode(['success' => false, 'error' => 'Database connection failed']));
 }
 
-// 1. Get the incoming JSON from the browser
 $jsonInput = file_get_contents('php://input');
-$incomingCards = json_decode($jsonInput, true);
+$incomingPayload = json_decode($jsonInput, true);
 
-if ($incomingCards) {
-    // 2. Process incoming cards (Last Write Wins against the server DB)
-    $stmt = $conn->prepare("SELECT last_modified FROM flashcards WHERE id = ?");
-    $updateStmt = $conn->prepare("REPLACE INTO flashcards (id, question, answer, last_modified, deleted) VALUES (?, ?, ?, ?, ?)");
+// --- 1. HANDLE INCOMING (PUSH) ---
+if ($incomingPayload) {
+    foreach ($incomingPayload as $item) {
+        $id = $item['entity_id'];
+        $type = $item['entity_type'];
+        $op = $item['operation'];
+        $data = $item['data'];
 
-    foreach ($incomingCards as $card) {
-        $stmt->bind_param("s", $card['id']);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $serverCard = $result->fetch_assoc();
-
-        // If the server doesn't have it, or the incoming card is newer, save it to MySQL
-        if (!$serverCard || $card['last_modified'] > $serverCard['last_modified']) {
-            $updateStmt->bind_param("sssii", 
-                $card['id'], 
-                $card['question'], 
-                $card['answer'], 
-                $card['last_modified'], 
-                $card['deleted']
-            );
-            $updateStmt->execute();
+        if ($op === 'DELETE') {
+            $table = strtolower($type) . "s";
+            $conn->query("UPDATE $table SET deleted = 1, last_modified = " . (time() * 1000) . " WHERE id = '$id'");
+            continue;
         }
+
+        // Logic: Replace into MySQL (Last Write Wins)
+        if ($type === 'FOLDER') {
+            $stmt = $conn->prepare("REPLACE INTO folders (id, parent_id, name, last_modified, deleted) VALUES (?, ?, ?, ?, ?)");
+            $stmt->bind_param("sssii", $data['id'], $data['parent_id'], $data['name'], $data['last_modified'], $data['deleted']);
+        } else if ($type === 'DECK') {
+            $stmt = $conn->prepare("REPLACE INTO decks (id, folder_id, name, next_session_date, srs_step, last_reviewed_date, session_enabled, last_modified, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("sssiisiii", $data['id'], $data['folder_id'], $data['name'], $data['next_session_date'], $data['srs_step'], $data['last_reviewed_date'], $data['session_enabled'], $data['last_modified'], $data['deleted']);
+        } else if ($type === 'FLASHCARD') {
+            $stmt = $conn->prepare("REPLACE INTO flashcards (id, deck_id, question, answer, position, last_modified, deleted) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("ssssiii", $data['id'], $data['deck_id'], $data['question'], $data['answer'], $data['position'], $data['last_modified'], $data['deleted']);
+        }
+
+        if (isset($stmt)) $stmt->execute();
     }
 }
 
-// 3. Send the entire server state back to the browser
-// (For a production app, you'd only send changes, but this is perfect for learning)
-$result = $conn->query("SELECT * FROM flashcards");
-$serverData = [];
-while ($row = $result->fetch_assoc()) {
-    // Cast numeric strings back to actual numbers for JavaScript
-    $row['last_modified'] = (int)$row['last_modified'];
-    $row['deleted'] = (int)$row['deleted'];
-    $serverData[] = $row;
-}
+// --- 2. GATHER SERVER STATE (PULL) ---
+$response = [
+    'success' => true,
+    'server_state' => [
+        'folders' => $conn->query("SELECT * FROM folders")->fetch_all(MYSQLI_ASSOC),
+        'decks' => $conn->query("SELECT * FROM decks")->fetch_all(MYSQLI_ASSOC),
+        'flashcards' => $conn->query("SELECT * FROM flashcards")->fetch_all(MYSQLI_ASSOC)
+    ]
+];
 
-echo json_encode($serverData);
+echo json_encode($response);
 $conn->close();
 ?>

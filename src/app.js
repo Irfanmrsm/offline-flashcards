@@ -14,7 +14,7 @@ const hubEmptyState = document.getElementById('hub-empty-state');
 const breadcrumbTrail = document.getElementById('breadcrumb-trail');
 const syncBtn = document.getElementById('sync-btn'); 
 
-// --- 3. NAVIGATION CONTROLLER ---
+// --- 3. NAVIGATION & BREADCRUMBS ---
 function switchView(viewId) {
     viewHub.classList.add('hidden');
     viewStudio.classList.add('hidden');
@@ -28,9 +28,21 @@ function renderBreadcrumbs() {
         const span = document.createElement('span');
         span.className = 'crumb';
         span.innerText = crumb.name;
+        span.style.padding = "5px"; // Added padding for a better drop target
+        span.style.borderRadius = "4px";
+
         if (index < breadcrumbs.length - 1) {
             span.onclick = () => openFolder(crumb.id, crumb.name, index);
             span.innerText += " / ";
+            
+            // Allow dropping items onto breadcrumbs to move them "UP" the folder tree
+            span.addEventListener('dragover', e => { e.preventDefault(); span.style.background = '#e2e8f0'; });
+            span.addEventListener('dragleave', e => span.style.background = 'transparent');
+            span.addEventListener('drop', async e => {
+                e.preventDefault();
+                span.style.background = 'transparent';
+                await handleDrop(e, crumb.id); // Move to this breadcrumb's folder
+            });
         } else {
             span.style.color = "#333"; 
             span.style.textDecoration = "none";
@@ -40,29 +52,72 @@ function renderBreadcrumbs() {
     });
 }
 
-// --- 4. THE HUB LOGIC ---
+// --- 4. THE HUB LOGIC (With Drag-and-Drop & Notifications) ---
+
 async function loadHub() {
     try {
-        const folders = await db.folders.where('parent_id').equals(currentFolderId).and(f => f.deleted === 0).toArray();
-        const decks = await db.decks.where('folder_id').equals(currentFolderId).and(d => d.deleted === 0).toArray();
+        const allFolders = await db.folders.where('deleted').equals(0).toArray();
+        const allDecks = await db.decks.where('deleted').equals(0).toArray();
+        const now = Date.now();
+
+        // 1. Calculate Notifications (How many decks are due inside each folder)
+        let folderDueCounts = {};
+        allDecks.forEach(deck => {
+            // Is this deck due?
+            if (deck.session_enabled !== 0 && (deck.next_session_date || 0) <= now) {
+                let currentFid = deck.folder_id;
+                // Propagate the notification up the folder tree
+                while (currentFid && currentFid !== "") {
+                    folderDueCounts[currentFid] = (folderDueCounts[currentFid] || 0) + 1;
+                    const parentFolder = allFolders.find(f => f.id === currentFid);
+                    currentFid = parentFolder ? parentFolder.parent_id : "";
+                }
+            }
+        });
+
+        // 2. Filter items just for the current screen
+        const folders = allFolders.filter(f => f.parent_id === currentFolderId);
+        const decks = allDecks.filter(d => d.folder_id === currentFolderId);
 
         itemGrid.innerHTML = '';
         if (folders.length === 0 && decks.length === 0) {
             hubEmptyState.classList.remove('hidden');
         } else {
             hubEmptyState.classList.add('hidden');
+            
+            // RENDER FOLDERS
             folders.forEach(folder => {
                 const div = document.createElement('div');
                 div.className = 'grid-item';
-                div.innerHTML = `<div class="folder-icon">📁</div><h3>${folder.name}</h3>`;
+                div.draggable = true; 
+                div.style.position = 'relative'; // Required for the notification badge
+
+                // Check if this folder has due decks inside it
+                const dueCount = folderDueCounts[folder.id] || 0;
+                const badgeHTML = dueCount > 0 ? `<div style="position: absolute; top: -5px; right: -5px; background: #dc3545; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">${dueCount}</div>` : '';
+
+                div.innerHTML = `${badgeHTML}<div class="folder-icon">📁</div><h3>${folder.name}</h3>`;
                 div.onclick = () => openFolder(folder.id, folder.name);
+                
+                attachDragAndDropEvents(div, folder.id, 'folder', allFolders);
                 itemGrid.appendChild(div);
             });
+
+            // RENDER DECKS
             decks.forEach(deck => {
                 const div = document.createElement('div');
                 div.className = 'grid-item';
-                div.innerHTML = `<div class="folder-icon">🃏</div><h3>${deck.name}</h3>`;
+                div.draggable = true; 
+                div.style.position = 'relative';
+                
+                // Show a simple red dot if the deck itself is due
+                const isDue = deck.session_enabled !== 0 && (deck.next_session_date || 0) <= now;
+                const dotHTML = isDue ? `<div style="position: absolute; top: 5px; right: 5px; background: #dc3545; border-radius: 50%; width: 12px; height: 12px;"></div>` : '';
+
+                div.innerHTML = `${dotHTML}<div class="folder-icon">🃏</div><h3>${deck.name}</h3>`;
                 div.onclick = () => openDeckStudio(deck.id, deck.name);
+                
+                attachDragAndDropEvents(div, deck.id, 'deck', allFolders);
                 itemGrid.appendChild(div);
             });
         }
@@ -73,13 +128,78 @@ async function loadHub() {
     }
 }
 
+// DRAG AND DROP PHYSICS ENGINE FOR THE HUB
+function attachDragAndDropEvents(element, id, type, allFolders) {
+    // 1. Picking it up
+    element.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', JSON.stringify({ id, type }));
+        element.style.opacity = '0.5';
+    });
+    
+    element.addEventListener('dragend', () => element.style.opacity = '1');
+
+    // 2. Only FOLDERS can have things dropped INTO them
+    if (type === 'folder') {
+        element.addEventListener('dragover', e => {
+            e.preventDefault(); // Allows dropping
+            element.style.transform = 'scale(1.05)';
+            element.style.boxShadow = '0 0 10px rgba(0, 123, 255, 0.5)';
+        });
+        
+        element.addEventListener('dragleave', e => {
+            element.style.transform = 'scale(1)';
+            element.style.boxShadow = 'none';
+        });
+
+        element.addEventListener('drop', async e => {
+            e.preventDefault();
+            e.stopPropagation(); // Stops the drop from bubbling up
+            element.style.transform = 'scale(1)';
+            element.style.boxShadow = 'none';
+            
+            const draggedData = JSON.parse(e.dataTransfer.getData('text/plain'));
+            
+            // Prevent dropping a folder into itself, or a parent into its own child (infinite loop!)
+            if (draggedData.id === id) return; 
+            if (draggedData.type === 'folder' && isDescendant(id, draggedData.id, allFolders)) {
+                return alert("You cannot move a folder into its own sub-folder!");
+            }
+
+            await handleDrop(e, id, draggedData);
+        });
+    }
+}
+
+// Executes the database change when an item is dropped
+async function handleDrop(e, targetFolderId, providedData = null) {
+    const data = providedData || JSON.parse(e.dataTransfer.getData('text/plain'));
+    const now = Date.now();
+
+    if (data.type === 'folder') {
+        await db.folders.update(data.id, { parent_id: targetFolderId, last_modified: now });
+        await db.changelog.add({ entity_id: data.id, entity_type: 'FOLDER', operation: 'UPDATE', synced: 0 });
+    } else if (data.type === 'deck') {
+        await db.decks.update(data.id, { folder_id: targetFolderId, last_modified: now });
+        await db.changelog.add({ entity_id: data.id, entity_type: 'DECK', operation: 'UPDATE', synced: 0 });
+    }
+    loadHub(); // Refresh the screen instantly
+}
+
+// Infinite Loop Protection: Checks if target folder is inside the dragged folder
+function isDescendant(targetId, draggedId, allFolders) {
+    let currentId = targetId;
+    while (currentId && currentId !== "") {
+        if (currentId === draggedId) return true;
+        const parent = allFolders.find(f => f.id === currentId);
+        currentId = parent ? parent.parent_id : "";
+    }
+    return false;
+}
+
 function openFolder(folderId, folderName, sliceIndex = null) {
     currentFolderId = folderId;
-    if (sliceIndex !== null) {
-        breadcrumbs = breadcrumbs.slice(0, sliceIndex + 1);
-    } else {
-        breadcrumbs.push({ id: folderId, name: folderName });
-    }
+    if (sliceIndex !== null) breadcrumbs = breadcrumbs.slice(0, sliceIndex + 1);
+    else breadcrumbs.push({ id: folderId, name: folderName });
     loadHub();
 }
 
@@ -143,35 +263,42 @@ async function loadCardsForCurrentDeck() {
     const deck = await db.decks.get(currentDeckId); 
 
     const now = Date.now();
-    let dueCount = 0;
-    let nextReviewTs = Infinity;
+    const nextSessionDate = deck.next_session_date || 0;
+    
+    // LOGIC: Is it due? AND have they reviewed it since it became due?
+    const isDue = now >= nextSessionDate;
+    const hasReviewedSinceDue = deck.last_reviewed_date && deck.last_reviewed_date >= nextSessionDate;
 
-    cards.forEach(card => {
-        const reviewDate = card.next_review_date || 0; 
-        if (reviewDate <= now) dueCount++; 
-        else if (reviewDate < nextReviewTs) nextReviewTs = reviewDate; 
-    });
-
-    // Update the UI Dashboard
     document.getElementById('stat-total').innerText = cards.length;
+    const sessionDoneBtn = document.getElementById('session-done-btn');
     
     if (deck.session_enabled === 0) {
         document.getElementById('stat-due').innerText = "Paused";
         document.getElementById('stat-next').innerText = "Paused";
+        sessionDoneBtn.disabled = true;
     } else {
-        document.getElementById('stat-due').innerText = dueCount;
-        if (nextReviewTs === Infinity) {
-            document.getElementById('stat-next').innerText = "None";
+        document.getElementById('stat-due').innerText = isDue ? "🔴 Yes" : "🟢 No";
+        
+        if (isDue) {
+            document.getElementById('stat-next').innerText = "Now";
         } else {
-            const daysAway = Math.ceil((nextReviewTs - now) / (1000 * 60 * 60 * 24));
+            const daysAway = Math.ceil((nextSessionDate - now) / (1000 * 60 * 60 * 24));
             document.getElementById('stat-next').innerText = daysAway === 1 ? "Tomorrow" : `In ${daysAway} days`;
+        }
+
+        // BUTTON UNLOCK LOGIC
+        if (isDue && hasReviewedSinceDue && cards.length > 0) {
+            sessionDoneBtn.disabled = false;
+            sessionDoneBtn.title = "Click to log this session and schedule the next one!";
+        } else {
+            sessionDoneBtn.disabled = true;
+            if (!isDue) sessionDoneBtn.title = "Not due yet.";
+            else if (!hasReviewedSinceDue) sessionDoneBtn.title = "Review the deck first!";
         }
     }
 
-    // --- THIS IS THE VARIABLE JAVASCRIPT WAS MISSING! ---
     const cardList = document.getElementById('card-list');
     cardList.innerHTML = '';
-
     if (cards.length === 0) {
         cardList.innerHTML = '<p class="empty-state">No cards yet. Click "Add Card" to start!</p>';
         return;
@@ -184,46 +311,31 @@ async function loadCardsForCurrentDeck() {
         div.className = 'card-row draggable-card'; 
         div.draggable = true; 
         div.dataset.id = card.id; 
-        
         div.style.cssText = "background: white; padding: 15px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #ddd; display: flex; flex-direction: column; cursor: default;";
         
-        let dueIndicator = "";
-        if (deck.session_enabled !== 0) {
-            dueIndicator = (card.next_review_date || 0) <= now ? '🔴' : '🟢';
-        }
-
-        // Clean up line breaks for the single-line summary
         const summaryText = card.question.replace(/\n/g, ' ');
 
         div.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                
-                <div style="display: flex; align-items: center; flex-grow: 1; overflow: hidden; cursor: pointer;" onclick="togglePreview('${card.id}')" title="Click to preview full card">
-                    <span style="font-size: 1.5rem; color: #ccc; margin-right: 15px; cursor: grab;" title="Drag to reorder">☰</span>
+                <div style="display: flex; align-items: center; flex-grow: 1; overflow: hidden; cursor: pointer;" onclick="togglePreview('${card.id}')">
+                    <span style="font-size: 1.5rem; color: #ccc; margin-right: 15px; cursor: grab;">☰</span>
                     <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;">
-                        <span>${dueIndicator} <strong>Q:</strong> ${summaryText}</span>
+                        <span>🔹 <strong>Q:</strong> ${summaryText}</span>
                     </div>
                 </div>
-
                 <div style="display: flex; gap: 5px;">
                     <button class="primary-btn" onclick="editCard('${card.id}')">Edit</button>
                     <button class="danger-btn" onclick="deleteCard('${card.id}')" style="background: #dc3545; color: white;">Delete</button>
                 </div>
             </div>
-
             <div id="preview-${card.id}" class="hidden" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #ccc; background: #fdfdfd;">
                 <p style="white-space: pre-wrap; margin-bottom: 10px;"><strong>Question:</strong><br>${card.question}</p>
                 <p style="white-space: pre-wrap; color: #555;"><strong>Answer:</strong><br>${card.answer}</p>
-                <div style="margin-top: 15px; font-size: 0.85rem; color: #888;">
-                    <em>Current SRS Step: ${card.srs_step || 0} | Next Review: ${card.next_review_date ? new Date(card.next_review_date).toLocaleDateString() : 'Brand New'}</em>
-                </div>
             </div>
         `;
 
-        // Drag events
         div.addEventListener('dragstart', () => { div.style.opacity = '0.4'; div.classList.add('dragging'); });
         div.addEventListener('dragend', () => { div.style.opacity = '1'; div.classList.remove('dragging'); saveCardOrder(); });
-
         cardList.appendChild(div);
     });
 }
@@ -275,6 +387,44 @@ async function deleteCard(cardId) {
     loadCardsForCurrentDeck();
 }
 
+// --- MODAL KEYBOARD SHORTCUTS (Power User Workflow) ---
+document.addEventListener('keydown', (event) => {
+    // ONLY run these shortcuts if the Add/Edit Modal is actually open on the screen
+    if (!cardModal.classList.contains('hidden')) {
+
+        // 1. Shift + Enter -> Jump to Answer box
+        if (event.shiftKey && event.key === 'Enter' && document.activeElement === modalQ) {
+            event.preventDefault(); // Stops it from creating a new line in the question
+            modalA.focus();
+        }
+
+        // 2. Shift + Backspace -> Jump back to Question box
+        if (event.shiftKey && event.key === 'Backspace' && document.activeElement === modalA) {
+            event.preventDefault(); // Stops it from deleting a character
+            modalQ.focus();
+        }
+
+        // 3. Ctrl + S (or Cmd + S on Mac) -> Save and Close
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+            event.preventDefault(); // Stops the browser from trying to download the HTML file
+            document.getElementById('modal-save').click();
+        }
+
+        // 4. Ctrl + N (or Cmd + N on Mac) -> Save and immediately start a New Card
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+            event.preventDefault(); // Stops the browser from opening a new window
+            
+            // First, click save to store the current card in the database
+            document.getElementById('modal-save').click();
+            
+            // Wait 100 milliseconds for the save to finish, then instantly open a new blank modal
+            setTimeout(() => {
+                document.getElementById('add-card-btn').click();
+            }, 100);
+        }
+    }
+});
+
 // --- 7. DECK MANAGEMENT ---
 document.getElementById('btn-back-hub').addEventListener('click', () => { currentDeckId = null; loadHub(); });
 
@@ -317,25 +467,17 @@ const flipHint = document.getElementById('flip-hint');
 const focusProgress = document.getElementById('focus-progress');
 
 document.getElementById('start-review-btn').addEventListener('click', async () => {
+    // 1. Fetch ALL cards, regardless of due date!
     const cards = await db.flashcards.where('deck_id').equals(currentDeckId).and(card => card.deleted === 0).toArray();
-    const now = Date.now();
-    const dueCards = cards.filter(card => (card.next_review_date || 0) <= now);
     
-    if (dueCards.length === 0) return alert("🎉 You are all caught up! No cards due for review right now.");
+    if (cards.length === 0) return alert("Add some cards to this deck first!");
 
-    // CHECK THE DROPDOWN TO DETERMINE THE SORT ORDER
     const orderStyle = document.getElementById('review-order-select').value;
-    
-    if (orderStyle === 'mixed') {
-        reviewQueue = dueCards.sort(() => Math.random() - 0.5);
-    } else if (orderStyle === 'ordered') {
-        reviewQueue = dueCards.sort((a, b) => (a.position || 0) - (b.position || 0));
-    } else if (orderStyle === 'reverse') {
-        reviewQueue = dueCards.sort((a, b) => (b.position || 0) - (a.position || 0));
-    }
+    if (orderStyle === 'mixed') reviewQueue = cards.sort(() => Math.random() - 0.5);
+    else if (orderStyle === 'ordered') reviewQueue = cards.sort((a, b) => (a.position || 0) - (b.position || 0));
+    else if (orderStyle === 'reverse') reviewQueue = cards.sort((a, b) => (b.position || 0) - (a.position || 0));
 
-    currentReviewIndex = 0; 
-    sessionCorrect = 0;
+    currentReviewIndex = 0; sessionCorrect = 0;
     switchView('view-focus');
     loadNextCardInQueue();
 });
@@ -349,8 +491,7 @@ function loadNextCardInQueue() {
     cardAnswer.innerText = currentCard.answer;
     cardAnswer.classList.add('hidden'); cardDivider.classList.add('hidden');
     focusControls.classList.add('hidden'); flipHint.classList.remove('hidden');
-    const percentComplete = (currentReviewIndex / reviewQueue.length) * 100;
-    document.getElementById('focus-progress-bar').value = percentComplete;
+    document.getElementById('focus-progress-bar').value = (currentReviewIndex / reviewQueue.length) * 100;
 }
 
 function flipCard() {
@@ -363,20 +504,9 @@ activeCard.addEventListener('click', flipCard);
 
 async function scoreCard(isCorrect) {
     if (!isFlipped) return; 
-    const card = reviewQueue[currentReviewIndex];
-    const now = Date.now();
-    let currentStep = card.srs_step || 0;
-
-    if (isCorrect) {
-        sessionCorrect++;
-        currentStep = Math.min(currentStep + 1, SRS_INTERVALS.length - 1);
-    } else {
-        currentStep = 0; 
-    }
-
-    const nextSessionDate = now + (SRS_INTERVALS[currentStep] * 24 * 60 * 60 * 1000);
-    await db.flashcards.update(card.id, { srs_step: currentStep, next_review_date: nextSessionDate, last_modified: now });
-    await db.changelog.add({ entity_id: card.id, entity_type: 'FLASHCARD', operation: 'UPDATE', synced: 0 });
+    if (isCorrect) sessionCorrect++;
+    
+    // Notice: NO MORE DATABASE UPDATES HERE! You can review as much as you want.
     currentReviewIndex++;
     loadNextCardInQueue();
 }
@@ -385,10 +515,15 @@ document.getElementById('btn-right').addEventListener('click', (e) => { e.stopPr
 document.getElementById('btn-wrong').addEventListener('click', (e) => { e.stopPropagation(); scoreCard(false); });
 
 async function endSession() {
-    await db.sessions.add({ deck_id: currentDeckId, date: Date.now(), total_cards: reviewQueue.length, correct_answers: sessionCorrect });
+    const now = Date.now();
+    await db.sessions.add({ deck_id: currentDeckId, date: now, total_cards: reviewQueue.length, correct_answers: sessionCorrect });
+    
+    // 2. Mark the DECK as having been reviewed today!
+    await db.decks.update(currentDeckId, { last_reviewed_date: now, last_modified: now });
+    await db.changelog.add({ entity_id: currentDeckId, entity_type: 'DECK', operation: 'UPDATE', synced: 0 });
+
     alert(`Session Complete! You got ${sessionCorrect} out of ${reviewQueue.length} right.`);
-    loadCardsForCurrentDeck(); 
-    switchView('view-studio');
+    openDeckStudio(currentDeckId, document.getElementById('studio-deck-title').innerText); 
 }
 document.getElementById('exit-review-btn').addEventListener('click', endSession);
 
@@ -446,16 +581,85 @@ async function saveCardOrder() {
 }
 
 // --- 11. XAMPP SYNC API ---
+
 syncBtn.addEventListener('click', async () => {
     syncBtn.innerText = "Syncing...";
+    syncBtn.disabled = true;
+
     try {
+        // 1. Grab all logs that haven't been sent to the server yet
         const unsyncedLogs = await db.changelog.where('synced').equals(0).toArray();
-        // Expand the sync logic here if needed!
-        alert("Ready to sync!");
+
+        if (unsyncedLogs.length === 0) {
+            alert("✅ Everything is already up to date!");
+            syncBtn.innerText = "Sync with Server";
+            syncBtn.disabled = false;
+            return;
+        }
+
+        // 2. Fetch the actual card/deck/folder data for each log
+        const payload = [];
+        for (const log of unsyncedLogs) {
+            let recordData = null;
+            // If it's a deletion, there is no data to grab, just the ID
+            if (log.operation !== 'DELETE') {
+                if (log.entity_type === 'FOLDER') recordData = await db.folders.get(log.entity_id);
+                if (log.entity_type === 'DECK') recordData = await db.decks.get(log.entity_id);
+                if (log.entity_type === 'FLASHCARD') recordData = await db.flashcards.get(log.entity_id);
+            }
+
+            payload.push({
+                log_id: log.log_id,
+                entity_id: log.entity_id,
+                entity_type: log.entity_type,
+                operation: log.operation,
+                data: recordData // This contains the actual text, answers, and SRS math
+            });
+        }
+
+        // 3. Send it to your XAMPP server
+        // NOTE: If you put sync.php inside a specific folder in htdocs, update this URL!
+        const response = await fetch('http://localhost/sync.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // A. Mark sent items as synced locally
+            for (const log of unsyncedLogs) {
+                await db.changelog.update(log.log_id, { synced: 1 });
+            }
+
+            // B. PROCESS THE PULL (Update Local with Server Data)
+            const tables = ['folders', 'decks', 'flashcards'];
+            
+            for (const tableName of tables) {
+                const serverItems = result.server_state[tableName];
+                
+                for (const serverItem of serverItems) {
+                    const localItem = await db[tableName].get(serverItem.id);
+                    
+                    // Only update if local doesn't exist OR server is newer
+                    if (!localItem || serverItem.last_modified > localItem.last_modified) {
+                        // We use .put() to insert or overwrite
+                        await db[tableName].put(serverItem);
+                    }
+                }
+            }
+
+            alert("🎉 Two-way Sync Complete! Your phone is now perfectly matched with the server.");
+            loadHub(); // Refresh the screen to show new folders/decks
+        }
+
     } catch (error) {
         console.error("Sync failed:", error);
+        alert("❌ Sync failed. Make sure XAMPP (Apache) is running!");
     } finally {
         syncBtn.innerText = "Sync with Server";
+        syncBtn.disabled = false;
     }
 });
 
@@ -501,4 +705,31 @@ document.getElementById('flip-all-btn').addEventListener('click', async () => {
 
     // Refresh the screen
     loadCardsForCurrentDeck();
+});
+
+// --- 13. SESSION DONE LOGIC ---
+document.getElementById('session-done-btn').addEventListener('click', async () => {
+    const deck = await db.decks.get(currentDeckId);
+    const now = Date.now();
+    
+    // Figure out what step the deck is on
+    let currentStep = deck.srs_step || 0;
+    
+    // Calculate next date based on the interval
+    const daysToWait = SRS_INTERVALS[currentStep];
+    const nextDate = now + (daysToWait * 24 * 60 * 60 * 1000);
+    
+    // Move up one step for next time
+    const nextStep = Math.min(currentStep + 1, SRS_INTERVALS.length - 1);
+
+    await db.decks.update(currentDeckId, {
+        srs_step: nextStep,
+        next_session_date: nextDate,
+        last_modified: now
+    });
+    
+    await db.changelog.add({ entity_id: currentDeckId, entity_type: 'DECK', operation: 'UPDATE', synced: 0 });
+
+    alert(`✅ Session marked as done! Next review is in ${daysToWait} day(s).`);
+    openDeckStudio(currentDeckId, deck.name); // Refresh UI
 });

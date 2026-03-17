@@ -55,7 +55,9 @@
                     <button id="toggle-session-btn" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;" title="Toggle Reminders">🔔 Active</button>
                     <button id="flip-all-btn" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;" title="Swap all Questions and Answers">🔄 Swap Q/A</button>
 
-                    <button id="start-review-btn" class="success-btn">Start Review</button>
+                    <button id="start-review-btn" class="primary-btn">Start Review</button>
+                    <button id="session-done-btn" class="success-btn" disabled>✅ Session Done</button>
+                    
                     <button id="add-card-btn" class="primary-btn">Add Card</button>
                 </div>
             </div>
@@ -94,10 +96,11 @@
                 </div>
             </div>
 
-            <div id="focus-controls" class="hidden">
-                <p class="hint-text">Did you get it right?</p>
-                <button id="btn-wrong" class="danger-btn">No (Left Arrow)</button>
-                <button id="btn-right" class="success-btn">Yes (Right Arrow)</button>
+            <div id="focus-controls" class="hidden" style="text-align: center; margin-top: 20px;">
+                <p class="hint-text" style="margin-bottom: 15px;">Did you get it right?</p>
+                
+                <button id="btn-right" class="success-btn" style="margin-right: 10px;">Yes (W / Left Arrow)</button>
+                <button id="btn-wrong" class="danger-btn">No (N / Right Arrow)</button>
             </div>
             
             <div id="flip-hint">
