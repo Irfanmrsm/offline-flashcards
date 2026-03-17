@@ -115,7 +115,7 @@ syncBtn.addEventListener('click', async () => {
         const validCards = cardsToSync.filter(card => card !== undefined);
 
         // 2. Send changes to XAMPP (PHP)
-        const response = await fetch('http://localhost/flashcards/sync.php', {
+        const response = await fetch('http://192.168.1.3/flashcards/sync.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(validCards)
