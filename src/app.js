@@ -600,7 +600,7 @@ syncBtn.addEventListener('click', async () => {
             payload.push({ log_id: log.log_id, entity_id: log.entity_id, entity_type: log.entity_type, operation: log.operation, data: recordData });
         }
 
-        // 2. Send request to server (using your perfect tunnel link!)
+        // 2. Send request to server
         const response = await fetch('https://0lltl173-80.asse.devtunnels.ms/flashcards/sync.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -610,22 +610,41 @@ syncBtn.addEventListener('click', async () => {
         const result = await response.json();
 
         if (result.success) {
+            // A. Mark local items as synced
             for (const log of unsyncedLogs) await db.changelog.update(log.log_id, { synced: 1 });
 
+            // B. PROCESS THE PULL (Optimized Parallel Processing)
             const tables = ['folders', 'decks', 'flashcards'];
             let itemsDownloaded = 0;
             
             for (const tableName of tables) {
                 const serverItems = result.server_state[tableName];
+                
+                // Fetch all local items in ONE massive request
+                const serverItemIds = serverItems.map(item => item.id);
+                const localItemsArray = await db[tableName].where('id').anyOf(serverItemIds).toArray();
+                
+                // Convert array to a dictionary for instant lookups
+                const localItemsMap = {};
+                localItemsArray.forEach(item => localItemsMap[item.id] = item);
+
+                // Figure out exactly which items need to be updated
+                const itemsToUpdate = [];
                 for (const serverItem of serverItems) {
-                    const localItem = await db[tableName].get(serverItem.id);
+                    const localItem = localItemsMap[serverItem.id];
                     if (!localItem || serverItem.last_modified > localItem.last_modified) {
-                        await db[tableName].put(serverItem);
-                        itemsDownloaded++;
+                        itemsToUpdate.push(serverItem);
                     }
+                }
+
+                // Save them all to the database at the exact same time
+                if (itemsToUpdate.length > 0) {
+                    await db[tableName].bulkPut(itemsToUpdate);
+                    itemsDownloaded += itemsToUpdate.length;
                 }
             }
 
+            // C. Final Alert
             if (unsyncedLogs.length === 0 && itemsDownloaded === 0) {
                  alert("✅ Everything is already up to date!");
             } else {

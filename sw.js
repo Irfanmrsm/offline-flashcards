@@ -1,6 +1,6 @@
 // sw.js
-// BUMPED TO v2!
-const CACHE_NAME = 'flashcard-cache-v2';
+// BUMPED TO v4!
+const CACHE_NAME = 'flashcard-cache-v4';
 
 const urlsToCache = [
     './',
@@ -8,7 +8,7 @@ const urlsToCache = [
     './styles/main.css',
     './src/database.js',
     './src/app.js',
-    'https://unpkg.com/dexie/dist/dexie.js'
+    './src/dexie.js' // <--- Pointing to your new local file!
 ];
 
 self.addEventListener('install', event => {
@@ -33,7 +33,7 @@ self.addEventListener('fetch', event => {
     );
 });
 
-// NEW: This automatically deletes the old v1 cache!
+// Automatically deletes any older caches!
 self.addEventListener('activate', event => {
     event.waitUntil(
         caches.keys().then(cacheNames => {
