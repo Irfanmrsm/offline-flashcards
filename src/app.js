@@ -594,7 +594,7 @@ syncBtn.addEventListener('click', async () => {
             alert("✅ Everything is already up to date!");
             syncBtn.innerText = "Sync with Server";
             syncBtn.disabled = false;
-            return;
+   
         }
 
         // 2. Fetch the actual card/deck/folder data for each log
@@ -619,7 +619,7 @@ syncBtn.addEventListener('click', async () => {
 
         // 3. Send it to your XAMPP server
         // NOTE: If you put sync.php inside a specific folder in htdocs, update this URL!
-        const response = await fetch('http://localhost/sync.php', {
+        const response = await fetch('https://0lltl173-80.asse.devtunnels.ms/flashcards/sync.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
