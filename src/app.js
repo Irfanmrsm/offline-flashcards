@@ -80,6 +80,16 @@ async function loadHub() {
         const decks = allDecks.filter(d => d.folder_id === currentFolderId);
 
         itemGrid.innerHTML = '';
+
+        const deleteFolderBtn = document.getElementById('delete-folder-btn');
+        if (deleteFolderBtn) {
+            if (currentFolderId === "") {
+                deleteFolderBtn.classList.add('hidden'); // Hide on Home screen
+            } else {
+                deleteFolderBtn.classList.remove('hidden'); // Show inside folders
+            }
+        }
+
         if (folders.length === 0 && decks.length === 0) {
             hubEmptyState.classList.remove('hidden');
         } else {
@@ -224,6 +234,54 @@ document.getElementById('new-deck-btn').addEventListener('click', async () => {
     const newDeck = { id: crypto.randomUUID(), folder_id: currentFolderId, name: name.trim(), next_session_date: 0, session_enabled: 1, last_modified: Date.now(), deleted: 0 };
     await db.decks.put(newDeck);
     await db.changelog.add({ entity_id: newDeck.id, entity_type: 'DECK', operation: 'CREATE', synced: 0 });
+    loadHub();
+});
+
+// --- DELETE FOLDER LOGIC (Recursive) ---
+document.getElementById('delete-folder-btn').addEventListener('click', async () => {
+    if (!currentFolderId) return;
+    
+    if (!confirm("WARNING: Are you sure you want to delete this folder? ALL sub-folders, decks, and flashcards inside it will be permanently deleted!")) return;
+
+    const now = Date.now();
+
+    // Helper function to delete everything inside the folder like a chain reaction
+    async function trashFolderContents(targetFolderId) {
+        // 1. Delete the folder itself
+        await db.folders.update(targetFolderId, { deleted: 1, last_modified: now });
+        await db.changelog.add({ entity_id: targetFolderId, entity_type: 'FOLDER', operation: 'DELETE', synced: 0 });
+
+        // 2. Find and delete all sub-folders inside it
+        const subFolders = await db.folders.where('parent_id').equals(targetFolderId).toArray();
+        for (const sub of subFolders) {
+            if (sub.deleted === 0) await trashFolderContents(sub.id); 
+        }
+
+        // 3. Find and delete all decks inside it
+        const decks = await db.decks.where('folder_id').equals(targetFolderId).toArray();
+        for (const deck of decks) {
+            if (deck.deleted === 0) {
+                await db.decks.update(deck.id, { deleted: 1, last_modified: now });
+                await db.changelog.add({ entity_id: deck.id, entity_type: 'DECK', operation: 'DELETE', synced: 0 });
+                
+                // 4. Delete all flashcards inside those decks
+                const cards = await db.flashcards.where('deck_id').equals(deck.id).toArray();
+                for (const card of cards) {
+                    await db.flashcards.update(card.id, { deleted: 1, last_modified: now });
+                    await db.changelog.add({ entity_id: card.id, entity_type: 'FLASHCARD', operation: 'DELETE', synced: 0 });
+                }
+            }
+        }
+    }
+
+    // Trigger the chain reaction!
+    await trashFolderContents(currentFolderId);
+
+    // Bump the user back up one level in the breadcrumb trail
+    breadcrumbs.pop();
+    currentFolderId = breadcrumbs[breadcrumbs.length - 1].id;
+    
+    // Refresh the screen
     loadHub();
 });
 
@@ -589,7 +647,6 @@ syncBtn.addEventListener('click', async () => {
         const unsyncedLogs = await db.changelog.where('synced').equals(0).toArray();
         const payload = [];
 
-        // 1. Gather upload data
         for (const log of unsyncedLogs) {
             let recordData = null;
             if (log.operation !== 'DELETE') {
@@ -600,28 +657,19 @@ syncBtn.addEventListener('click', async () => {
             payload.push({ log_id: log.log_id, entity_id: log.entity_id, entity_type: log.entity_type, operation: log.operation, data: recordData });
         }
 
-        // Grab the last time we synced (Default to 0 if we've never synced before)
         const lastSyncTime = localStorage.getItem('flashcard_last_sync') || 0;
+        const requestBody = { payload: payload, last_sync: parseInt(lastSyncTime) };
 
-        // Package the payload AND the timestamp together
-        const requestBody = {
-            payload: payload,
-            last_sync: parseInt(lastSyncTime)
-        };
-
-        // 2. Send request to server
         const response = await fetch('https://0lltl173-80.asse.devtunnels.ms/flashcards/sync.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody) // Send the new combined object
+            body: JSON.stringify(requestBody)
         });
 
         const result = await response.json();
 
         if (result.success) {
-            // Update our local sync clock to right now!
             localStorage.setItem('flashcard_last_sync', Date.now());
-
             for (const log of unsyncedLogs) await db.changelog.update(log.log_id, { synced: 1 });
 
             const tables = ['folders', 'decks', 'flashcards'];
@@ -629,7 +677,7 @@ syncBtn.addEventListener('click', async () => {
             
             for (const tableName of tables) {
                 const serverItems = result.server_state[tableName];
-                if (!serverItems || serverItems.length === 0) continue; // Skip if the server sent nothing new!
+                if (!serverItems || serverItems.length === 0) continue; 
                 
                 const serverItemIds = serverItems.map(item => item.id);
                 const localItemsArray = await db[tableName].where('id').anyOf(serverItemIds).toArray();
@@ -639,6 +687,22 @@ syncBtn.addEventListener('click', async () => {
 
                 const itemsToUpdate = [];
                 for (const serverItem of serverItems) {
+                    
+                    // --- THE FIX: Convert PHP Text Strings back into JS Numbers ---
+                    serverItem.deleted = parseInt(serverItem.deleted);
+                    serverItem.last_modified = parseInt(serverItem.last_modified);
+                    
+                    if (tableName === 'decks') {
+                        serverItem.session_enabled = parseInt(serverItem.session_enabled);
+                        serverItem.next_session_date = parseInt(serverItem.next_session_date);
+                        serverItem.srs_step = parseInt(serverItem.srs_step);
+                        serverItem.last_reviewed_date = serverItem.last_reviewed_date ? parseInt(serverItem.last_reviewed_date) : 0;
+                    }
+                    if (tableName === 'flashcards') {
+                        serverItem.position = parseInt(serverItem.position);
+                    }
+                    // --------------------------------------------------------------
+
                     const localItem = localItemsMap[serverItem.id];
                     if (!localItem || serverItem.last_modified > localItem.last_modified) {
                         itemsToUpdate.push(serverItem);
