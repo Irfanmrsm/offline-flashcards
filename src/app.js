@@ -581,44 +581,26 @@ async function saveCardOrder() {
 }
 
 // --- 11. XAMPP SYNC API ---
-
 syncBtn.addEventListener('click', async () => {
     syncBtn.innerText = "Syncing...";
     syncBtn.disabled = true;
 
     try {
-        // 1. Grab all logs that haven't been sent to the server yet
         const unsyncedLogs = await db.changelog.where('synced').equals(0).toArray();
-
-        if (unsyncedLogs.length === 0) {
-            alert("✅ Everything is already up to date!");
-            syncBtn.innerText = "Sync with Server";
-            syncBtn.disabled = false;
-   
-        }
-
-        // 2. Fetch the actual card/deck/folder data for each log
         const payload = [];
+
+        // 1. Gather upload data
         for (const log of unsyncedLogs) {
             let recordData = null;
-            // If it's a deletion, there is no data to grab, just the ID
             if (log.operation !== 'DELETE') {
                 if (log.entity_type === 'FOLDER') recordData = await db.folders.get(log.entity_id);
                 if (log.entity_type === 'DECK') recordData = await db.decks.get(log.entity_id);
                 if (log.entity_type === 'FLASHCARD') recordData = await db.flashcards.get(log.entity_id);
             }
-
-            payload.push({
-                log_id: log.log_id,
-                entity_id: log.entity_id,
-                entity_type: log.entity_type,
-                operation: log.operation,
-                data: recordData // This contains the actual text, answers, and SRS math
-            });
+            payload.push({ log_id: log.log_id, entity_id: log.entity_id, entity_type: log.entity_type, operation: log.operation, data: recordData });
         }
 
-        // 3. Send it to your XAMPP server
-        // NOTE: If you put sync.php inside a specific folder in htdocs, update this URL!
+        // 2. Send request to server (using your perfect tunnel link!)
         const response = await fetch('https://0lltl173-80.asse.devtunnels.ms/flashcards/sync.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -628,35 +610,31 @@ syncBtn.addEventListener('click', async () => {
         const result = await response.json();
 
         if (result.success) {
-            // A. Mark sent items as synced locally
-            for (const log of unsyncedLogs) {
-                await db.changelog.update(log.log_id, { synced: 1 });
-            }
+            for (const log of unsyncedLogs) await db.changelog.update(log.log_id, { synced: 1 });
 
-            // B. PROCESS THE PULL (Update Local with Server Data)
             const tables = ['folders', 'decks', 'flashcards'];
+            let itemsDownloaded = 0;
             
             for (const tableName of tables) {
                 const serverItems = result.server_state[tableName];
-                
                 for (const serverItem of serverItems) {
                     const localItem = await db[tableName].get(serverItem.id);
-                    
-                    // Only update if local doesn't exist OR server is newer
                     if (!localItem || serverItem.last_modified > localItem.last_modified) {
-                        // We use .put() to insert or overwrite
                         await db[tableName].put(serverItem);
+                        itemsDownloaded++;
                     }
                 }
             }
 
-            alert("🎉 Two-way Sync Complete! Your phone is now perfectly matched with the server.");
-            loadHub(); // Refresh the screen to show new folders/decks
+            if (unsyncedLogs.length === 0 && itemsDownloaded === 0) {
+                 alert("✅ Everything is already up to date!");
+            } else {
+                 alert(`🎉 Sync Complete! Uploaded ${unsyncedLogs.length} changes and downloaded ${itemsDownloaded} updates.`);
+            }
+            loadHub(); 
         }
-
     } catch (error) {
-        console.error("Sync failed:", error);
-        alert("❌ Sync failed. Make sure XAMPP (Apache) is running!");
+        alert("❌ Sync failed. Make sure XAMPP is running!");
     } finally {
         syncBtn.innerText = "Sync with Server";
         syncBtn.disabled = false;
