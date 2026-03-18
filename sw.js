@@ -8,7 +8,7 @@ const urlsToCache = [
     './styles/main.css',
     './src/database.js',
     './src/app.js',
-    './src/dexie.js' // <--- Pointing to your new local file!
+    './src/dexie.js' // Pointing to your local database file
 ];
 
 self.addEventListener('install', event => {
@@ -22,6 +22,7 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('fetch', event => {
+    // Never cache the sync API! It must always hit the real network.
     if (event.request.url.includes('sync.php')) {
         return; 
     }

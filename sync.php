@@ -13,10 +13,14 @@ if ($conn->connect_error) {
 }
 
 $jsonInput = file_get_contents('php://input');
-$incomingPayload = json_decode($jsonInput, true);
+$requestData = json_decode($jsonInput, true);
+
+// Extract the payload and the timestamp
+$incomingPayload = isset($requestData['payload']) ? $requestData['payload'] : [];
+$lastSyncTime = isset($requestData['last_sync']) ? (int)$requestData['last_sync'] : 0;
 
 // --- 1. HANDLE INCOMING (PUSH) ---
-if ($incomingPayload) {
+if (!empty($incomingPayload)) {
     foreach ($incomingPayload as $item) {
         $id = $item['entity_id'];
         $type = $item['entity_type'];
@@ -29,7 +33,6 @@ if ($incomingPayload) {
             continue;
         }
 
-        // Logic: Replace into MySQL (Last Write Wins)
         if ($type === 'FOLDER') {
             $stmt = $conn->prepare("REPLACE INTO folders (id, parent_id, name, last_modified, deleted) VALUES (?, ?, ?, ?, ?)");
             $stmt->bind_param("sssii", $data['id'], $data['parent_id'], $data['name'], $data['last_modified'], $data['deleted']);
@@ -45,13 +48,14 @@ if ($incomingPayload) {
     }
 }
 
-// --- 2. GATHER SERVER STATE (PULL) ---
+// --- 2. GATHER SERVER STATE (DELTA PULL) ---
+// ONLY grab items where the last_modified timestamp is GREATER than the phone's last sync time!
 $response = [
     'success' => true,
     'server_state' => [
-        'folders' => $conn->query("SELECT * FROM folders")->fetch_all(MYSQLI_ASSOC),
-        'decks' => $conn->query("SELECT * FROM decks")->fetch_all(MYSQLI_ASSOC),
-        'flashcards' => $conn->query("SELECT * FROM flashcards")->fetch_all(MYSQLI_ASSOC)
+        'folders' => $conn->query("SELECT * FROM folders WHERE last_modified > $lastSyncTime")->fetch_all(MYSQLI_ASSOC),
+        'decks' => $conn->query("SELECT * FROM decks WHERE last_modified > $lastSyncTime")->fetch_all(MYSQLI_ASSOC),
+        'flashcards' => $conn->query("SELECT * FROM flashcards WHERE last_modified > $lastSyncTime")->fetch_all(MYSQLI_ASSOC)
     ]
 ];
 

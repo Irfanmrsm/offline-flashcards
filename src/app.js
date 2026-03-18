@@ -600,35 +600,43 @@ syncBtn.addEventListener('click', async () => {
             payload.push({ log_id: log.log_id, entity_id: log.entity_id, entity_type: log.entity_type, operation: log.operation, data: recordData });
         }
 
+        // Grab the last time we synced (Default to 0 if we've never synced before)
+        const lastSyncTime = localStorage.getItem('flashcard_last_sync') || 0;
+
+        // Package the payload AND the timestamp together
+        const requestBody = {
+            payload: payload,
+            last_sync: parseInt(lastSyncTime)
+        };
+
         // 2. Send request to server
         const response = await fetch('https://0lltl173-80.asse.devtunnels.ms/flashcards/sync.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(requestBody) // Send the new combined object
         });
 
         const result = await response.json();
 
         if (result.success) {
-            // A. Mark local items as synced
+            // Update our local sync clock to right now!
+            localStorage.setItem('flashcard_last_sync', Date.now());
+
             for (const log of unsyncedLogs) await db.changelog.update(log.log_id, { synced: 1 });
 
-            // B. PROCESS THE PULL (Optimized Parallel Processing)
             const tables = ['folders', 'decks', 'flashcards'];
             let itemsDownloaded = 0;
             
             for (const tableName of tables) {
                 const serverItems = result.server_state[tableName];
+                if (!serverItems || serverItems.length === 0) continue; // Skip if the server sent nothing new!
                 
-                // Fetch all local items in ONE massive request
                 const serverItemIds = serverItems.map(item => item.id);
                 const localItemsArray = await db[tableName].where('id').anyOf(serverItemIds).toArray();
                 
-                // Convert array to a dictionary for instant lookups
                 const localItemsMap = {};
                 localItemsArray.forEach(item => localItemsMap[item.id] = item);
 
-                // Figure out exactly which items need to be updated
                 const itemsToUpdate = [];
                 for (const serverItem of serverItems) {
                     const localItem = localItemsMap[serverItem.id];
@@ -637,14 +645,12 @@ syncBtn.addEventListener('click', async () => {
                     }
                 }
 
-                // Save them all to the database at the exact same time
                 if (itemsToUpdate.length > 0) {
                     await db[tableName].bulkPut(itemsToUpdate);
                     itemsDownloaded += itemsToUpdate.length;
                 }
             }
 
-            // C. Final Alert
             if (unsyncedLogs.length === 0 && itemsDownloaded === 0) {
                  alert("✅ Everything is already up to date!");
             } else {
