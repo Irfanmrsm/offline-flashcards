@@ -1,129 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<head>
+    <meta charset="UTF-8">
+    <title>Flashcards</title>
     <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pouchdb-find@8.0.1/dist/pouchdb.find.min.js"></script>
 </head>
-</head>
 <body>
-    <div id="auth-modal" class="modal">
-        <div class="modal-content" style="max-width: 400px; text-align: center;">
-            <h2>Login to Sync</h2>
-            <p style="margin-bottom: 20px; color: #666;">Create an account or sign in to save your flashcards to the cloud.</p>
-            
-            <div class="input-group">
-                <input type="email" id="auth-email" placeholder="Email Address" required>
-            </div>
-            <div class="input-group">
-                <input type="password" id="auth-password" placeholder="Password" required>
-            </div>
-            
-            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
-                <button id="btn-signup" class="primary-btn" style="background: #28a745;">Sign Up</button>
-                <button id="btn-login" class="primary-btn">Log In</button>
-            </div>
-            <p id="auth-error" style="color: red; margin-top: 15px; font-size: 0.9rem;"></p>
-        </div>
-    </div>
+
     <header class="top-nav">
         <div class="nav-left">
             <h2 id="breadcrumb-trail">
                 <span class="crumb" onclick="goHome()">Home</span>
             </h2>
         </div>
-        <div class="nav-right">
-            <button id="sync-btn" class="primary-btn">Sync with Server</button>
-        </div>
-    </header>
+        </header>
 
     <main id="app-container">
-        
-        <section id="view-hub" class="active-view">
-            <div class="action-bar" style="display: flex; gap: 10px; align-items: center;">
-                <button id="new-folder-btn">+ New Folder</button>
-                <button id="new-deck-btn" class="primary-btn">+ New Deck</button>
-                <button id="delete-folder-btn" class="danger-btn hidden" style="background: #dc3545; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer;">🗑️ Delete Folder</button>
-            </div>
-            
-            <div class="grid-container">
-                <p class="empty-state" id="hub-empty-state">No decks or folders here yet.</p>
-                <div id="item-grid" class="item-grid"></div>
-            </div>
-        </section>
-
-
-        <section id="view-studio" class="hidden">
-            <div class="studio-header">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="btn-back-hub">← Back</button>
-                    <h1 id="studio-deck-title">Deck Name</h1>
-                    <button id="btn-rename-deck" style="background: none; border: none; font-size: 1.2rem;" title="Rename Deck">✏️</button>
-                    <button id="btn-delete-deck" style="background: none; border: none; font-size: 1.2rem;" title="Delete Deck">🗑️</button>
-                </div>
-                
-                <div class="studio-actions" style="display: flex; gap: 10px; align-items: center;">
-                    <select id="review-order-select" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc;">
-                        <option value="mixed">🔀 Mixed</option>
-                        <option value="ordered">⬇️ Ordered</option>
-                        <option value="reverse">⬆️ Reverse</option>
-                    </select>
-                    
-                    <button id="toggle-session-btn" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;" title="Toggle Reminders">🔔 Active</button>
-                    <button id="flip-all-btn" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;" title="Swap all Questions and Answers">🔄 Swap Q/A</button>
-
-                    <button id="start-review-btn" class="primary-btn">Start Review</button>
-                    <button id="session-done-btn" class="success-btn" disabled>✅ Session Done</button>
-                    
-                    <button id="add-card-btn" class="primary-btn">Add Card</button>
-                </div>
-            </div>
-
-            <div class="stats-dashboard">
-                <div class="stat-box">Total Cards: <span id="stat-total">0</span></div>
-                <div class="stat-box">Due Today: <span id="stat-due">0</span></div>
-                <div class="stat-box">Next Session: <span id="stat-next">-</span></div>
-            </div>
-
-            <div class="card-list-container">
-                <div class="search-bar">
-                    <input type="text" id="search-cards" placeholder="Search cards...">
-                </div>
-                <div id="card-list" class="scrollable-list">
-                    </div>
-            </div>
-        </section>
-
-
-        <section id="view-focus" class="hidden">
-            <div class="focus-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <span id="focus-progress" style="font-weight: bold; font-size: 1.2rem;">Card 1 / 20</span>
-                <button id="exit-review-btn" class="danger-btn">End Session</button>
-            </div>
-            
-            <progress id="focus-progress-bar" value="0" max="100" style="width: 100%; height: 12px; margin-bottom: 30px; border-radius: 5px;"></progress>
-
-            <div class="flashcard-stage">
-                <div id="active-card" class="giant-card">
-                    <div id="card-question" class="card-text">Question goes here...</div>
-                    <hr id="card-divider" class="hidden">
-                    <div id="card-answer" class="card-text hidden">Answer goes here...</div>
-                </div>
-            </div>
-
-            <div id="focus-controls" class="hidden" style="text-align: center; margin-top: 20px;">
-                <p class="hint-text" style="margin-bottom: 15px;">Did you get it right?</p>
-                
-                <button id="btn-right" class="success-btn" style="margin-right: 10px;">Yes (W / Left Arrow)</button>
-                <button id="btn-wrong" class="danger-btn">No (N / Right Arrow)</button>
-            </div>
-            
-            <div id="flip-hint">
-                <p class="hint-text">Press Spacebar or Click to flip</p>
-            </div>
-        </section>
-
-    </main>
+        </main>
 
     <div id="card-modal" class="modal hidden">
         <div class="modal-content">
@@ -136,7 +30,7 @@
             </div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
     <script src="src/database.js"></script>
     <script src="src/app.js"></script>
 </body>
