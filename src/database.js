@@ -1,18 +1,33 @@
 // src/database.js
-const db = new Dexie('FlashcardSystemDB');
 
-db.version(3).stores({
-    folders: '&id, parent_id, name, last_modified, deleted',
-    decks: '&id, folder_id, name, next_session_date, session_enabled, last_modified, deleted',
-    flashcards: '&id, deck_id, position, last_modified, deleted',
-    sessions: '++session_id, deck_id, date, total_cards, correct_answers',
-    changelog: '++log_id, entity_id, entity_type, operation, synced'
-});
+// 1. Initialize the Local Browser Database
+const db = new PouchDB('flashcards_local');
 
-db.on('ready', function () {
-    console.log("Database is ready and schema is initialized!");
-});
+// 2. Initialize the Remote CouchDB Server (from Step 1)
+// In production, this would be a secure HTTPS URL without passwords in plain text
+const remoteDB = new PouchDB('http://admin:password@127.0.0.1:5984/flashcards_remote');
 
-db.open().catch(err => {
-    console.error("Failed to open db: ", err.stack || err);
+// 3. Create Indexes so we can query our NoSQL documents easily
+async function setupIndexes() {
+    await db.createIndex({ index: { fields: ['type'] } });
+    await db.createIndex({ index: { fields: ['parent_id'] } });
+    await db.createIndex({ index: { fields: ['folder_id'] } });
+    await db.createIndex({ index: { fields: ['deck_id'] } });
+}
+setupIndexes();
+
+// 4. THE SYNC ENGINE
+// This one function replaces your entire sync.php file and manual sync buttons.
+PouchDB.sync(db, remoteDB, {
+    live: true,  // Keep syncing continuously in the background
+    retry: true  // If the WiFi drops, keep trying until it comes back
+}).on('change', function (info) {
+    // This fires automatically whenever new data arrives from the server
+    console.log("New data arrived from server!", info);
+    
+    // Tell the UI to refresh automatically!
+    if (typeof loadHub === 'function') loadHub(); 
+    if (typeof loadCardsForCurrentDeck === 'function' && currentDeckId) loadCardsForCurrentDeck();
+}).on('error', function (err) {
+    console.error('Sync Error:', err);
 });

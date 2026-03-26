@@ -1,6 +1,6 @@
 // sw.js
-// BUMPED TO v7!
-const CACHE_NAME = 'flashcard-cache-v7';
+// BUMPED TO v8!
+const CACHE_NAME = 'flashcard-cache-v8';
 
 const urlsToCache = [
     './',

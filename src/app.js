@@ -12,7 +12,6 @@ const viewFocus = document.getElementById('view-focus');
 const itemGrid = document.getElementById('item-grid');
 const hubEmptyState = document.getElementById('hub-empty-state');
 const breadcrumbTrail = document.getElementById('breadcrumb-trail');
-const syncBtn = document.getElementById('sync-btn'); 
 
 // --- 3. NAVIGATION & BREADCRUMBS ---
 function switchView(viewId) {
@@ -28,20 +27,19 @@ function renderBreadcrumbs() {
         const span = document.createElement('span');
         span.className = 'crumb';
         span.innerText = crumb.name;
-        span.style.padding = "5px"; // Added padding for a better drop target
+        span.style.padding = "5px"; 
         span.style.borderRadius = "4px";
 
         if (index < breadcrumbs.length - 1) {
             span.onclick = () => openFolder(crumb.id, crumb.name, index);
             span.innerText += " / ";
             
-            // Allow dropping items onto breadcrumbs to move them "UP" the folder tree
             span.addEventListener('dragover', e => { e.preventDefault(); span.style.background = '#e2e8f0'; });
             span.addEventListener('dragleave', e => span.style.background = 'transparent');
             span.addEventListener('drop', async e => {
                 e.preventDefault();
                 span.style.background = 'transparent';
-                await handleDrop(e, crumb.id); // Move to this breadcrumb's folder
+                await handleDrop(e, crumb.id); 
             });
         } else {
             span.style.color = "#333"; 
@@ -52,30 +50,30 @@ function renderBreadcrumbs() {
     });
 }
 
-// --- 4. THE HUB LOGIC (With Drag-and-Drop & Notifications) ---
+// --- 4. THE HUB LOGIC ---
 
-async function loadHub() {
+// Global function so the PouchDB sync listener in database.js can trigger it
+window.loadHub = async function() {
     try {
-        const allFolders = await db.folders.where('deleted').equals(0).toArray();
-        const allDecks = await db.decks.where('deleted').equals(0).toArray();
+        const allFoldersResult = await db.find({ selector: { type: 'folder', deleted: 0 } });
+        const allDecksResult = await db.find({ selector: { type: 'deck', deleted: 0 } });
+        
+        const allFolders = allFoldersResult.docs;
+        const allDecks = allDecksResult.docs;
         const now = Date.now();
 
-        // 1. Calculate Notifications (How many decks are due inside each folder)
         let folderDueCounts = {};
         allDecks.forEach(deck => {
-            // Is this deck due?
             if (deck.session_enabled !== 0 && (deck.next_session_date || 0) <= now) {
                 let currentFid = deck.folder_id;
-                // Propagate the notification up the folder tree
                 while (currentFid && currentFid !== "") {
                     folderDueCounts[currentFid] = (folderDueCounts[currentFid] || 0) + 1;
-                    const parentFolder = allFolders.find(f => f.id === currentFid);
+                    const parentFolder = allFolders.find(f => f._id === currentFid);
                     currentFid = parentFolder ? parentFolder.parent_id : "";
                 }
             }
         });
 
-        // 2. Filter items just for the current screen
         const folders = allFolders.filter(f => f.parent_id === currentFolderId);
         const decks = allDecks.filter(d => d.folder_id === currentFolderId);
 
@@ -83,11 +81,8 @@ async function loadHub() {
 
         const deleteFolderBtn = document.getElementById('delete-folder-btn');
         if (deleteFolderBtn) {
-            if (currentFolderId === "") {
-                deleteFolderBtn.classList.add('hidden'); // Hide on Home screen
-            } else {
-                deleteFolderBtn.classList.remove('hidden'); // Show inside folders
-            }
+            if (currentFolderId === "") deleteFolderBtn.classList.add('hidden'); 
+            else deleteFolderBtn.classList.remove('hidden'); 
         }
 
         if (folders.length === 0 && decks.length === 0) {
@@ -95,39 +90,35 @@ async function loadHub() {
         } else {
             hubEmptyState.classList.add('hidden');
             
-            // RENDER FOLDERS
             folders.forEach(folder => {
                 const div = document.createElement('div');
                 div.className = 'grid-item';
                 div.draggable = true; 
-                div.style.position = 'relative'; // Required for the notification badge
+                div.style.position = 'relative'; 
 
-                // Check if this folder has due decks inside it
-                const dueCount = folderDueCounts[folder.id] || 0;
+                const dueCount = folderDueCounts[folder._id] || 0;
                 const badgeHTML = dueCount > 0 ? `<div style="position: absolute; top: -5px; right: -5px; background: #dc3545; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">${dueCount}</div>` : '';
 
                 div.innerHTML = `${badgeHTML}<div class="folder-icon">📁</div><h3>${folder.name}</h3>`;
-                div.onclick = () => openFolder(folder.id, folder.name);
+                div.onclick = () => openFolder(folder._id, folder.name);
                 
-                attachDragAndDropEvents(div, folder.id, 'folder', allFolders);
+                attachDragAndDropEvents(div, folder._id, 'folder', allFolders);
                 itemGrid.appendChild(div);
             });
 
-            // RENDER DECKS
             decks.forEach(deck => {
                 const div = document.createElement('div');
                 div.className = 'grid-item';
                 div.draggable = true; 
                 div.style.position = 'relative';
                 
-                // Show a simple red dot if the deck itself is due
                 const isDue = deck.session_enabled !== 0 && (deck.next_session_date || 0) <= now;
                 const dotHTML = isDue ? `<div style="position: absolute; top: 5px; right: 5px; background: #dc3545; border-radius: 50%; width: 12px; height: 12px;"></div>` : '';
 
                 div.innerHTML = `${dotHTML}<div class="folder-icon">🃏</div><h3>${deck.name}</h3>`;
-                div.onclick = () => openDeckStudio(deck.id, deck.name);
+                div.onclick = () => openDeckStudio(deck._id, deck.name);
                 
-                attachDragAndDropEvents(div, deck.id, 'deck', allFolders);
+                attachDragAndDropEvents(div, deck._id, 'deck', allFolders);
                 itemGrid.appendChild(div);
             });
         }
@@ -138,9 +129,7 @@ async function loadHub() {
     }
 }
 
-// DRAG AND DROP PHYSICS ENGINE FOR THE HUB
 function attachDragAndDropEvents(element, id, type, allFolders) {
-    // 1. Picking it up
     element.addEventListener('dragstart', (e) => {
         e.dataTransfer.setData('text/plain', JSON.stringify({ id, type }));
         element.style.opacity = '0.5';
@@ -148,10 +137,9 @@ function attachDragAndDropEvents(element, id, type, allFolders) {
     
     element.addEventListener('dragend', () => element.style.opacity = '1');
 
-    // 2. Only FOLDERS can have things dropped INTO them
     if (type === 'folder') {
         element.addEventListener('dragover', e => {
-            e.preventDefault(); // Allows dropping
+            e.preventDefault(); 
             element.style.transform = 'scale(1.05)';
             element.style.boxShadow = '0 0 10px rgba(0, 123, 255, 0.5)';
         });
@@ -163,13 +151,12 @@ function attachDragAndDropEvents(element, id, type, allFolders) {
 
         element.addEventListener('drop', async e => {
             e.preventDefault();
-            e.stopPropagation(); // Stops the drop from bubbling up
+            e.stopPropagation(); 
             element.style.transform = 'scale(1)';
             element.style.boxShadow = 'none';
             
             const draggedData = JSON.parse(e.dataTransfer.getData('text/plain'));
             
-            // Prevent dropping a folder into itself, or a parent into its own child (infinite loop!)
             if (draggedData.id === id) return; 
             if (draggedData.type === 'folder' && isDescendant(id, draggedData.id, allFolders)) {
                 return alert("You cannot move a folder into its own sub-folder!");
@@ -180,30 +167,35 @@ function attachDragAndDropEvents(element, id, type, allFolders) {
     }
 }
 
-// Executes the database change when an item is dropped
 async function handleDrop(e, targetFolderId, providedData = null) {
     const data = providedData || JSON.parse(e.dataTransfer.getData('text/plain'));
     const now = Date.now();
+    
+    // Fetch the document to get the _rev token, modify it, and put it back
+    const doc = await db.get(data.id);
+    doc.last_modified = now;
 
-    if (data.type === 'folder') {
-        await db.folders.update(data.id, { parent_id: targetFolderId, last_modified: now });
-        await db.changelog.add({ entity_id: data.id, entity_type: 'FOLDER', operation: 'UPDATE', synced: 0 });
-    } else if (data.type === 'deck') {
-        await db.decks.update(data.id, { folder_id: targetFolderId, last_modified: now });
-        await db.changelog.add({ entity_id: data.id, entity_type: 'DECK', operation: 'UPDATE', synced: 0 });
-    }
-    loadHub(); // Refresh the screen instantly
+    if (data.type === 'folder') doc.parent_id = targetFolderId;
+    else if (data.type === 'deck') doc.folder_id = targetFolderId;
+
+    await db.put(doc);
+    loadHub(); 
 }
 
-// Infinite Loop Protection: Checks if target folder is inside the dragged folder
 function isDescendant(targetId, draggedId, allFolders) {
     let currentId = targetId;
     while (currentId && currentId !== "") {
         if (currentId === draggedId) return true;
-        const parent = allFolders.find(f => f.id === currentId);
+        const parent = allFolders.find(f => f._id === currentId);
         currentId = parent ? parent.parent_id : "";
     }
     return false;
+}
+
+window.goHome = function() {
+    breadcrumbs = [{ id: "", name: "Home" }];
+    currentFolderId = "";
+    loadHub();
 }
 
 function openFolder(folderId, folderName, sliceIndex = null) {
@@ -213,75 +205,69 @@ function openFolder(folderId, folderName, sliceIndex = null) {
     loadHub();
 }
 
-function goHome() {
-    breadcrumbs = [{ id: "", name: "Home" }];
-    currentFolderId = "";
-    loadHub();
-}
-
 document.getElementById('new-folder-btn').addEventListener('click', async () => {
     const name = prompt("Enter folder name:");
     if (!name) return;
-    const newFolder = { id: crypto.randomUUID(), parent_id: currentFolderId, name: name.trim(), last_modified: Date.now(), deleted: 0 };
-    await db.folders.put(newFolder);
-    await db.changelog.add({ entity_id: newFolder.id, entity_type: 'FOLDER', operation: 'CREATE', synced: 0 });
+    const newFolder = { 
+        _id: 'folder:' + crypto.randomUUID(), 
+        type: 'folder',
+        parent_id: currentFolderId, 
+        name: name.trim(), 
+        last_modified: Date.now(), 
+        deleted: 0 
+    };
+    await db.put(newFolder);
     loadHub();
 });
 
 document.getElementById('new-deck-btn').addEventListener('click', async () => {
     const name = prompt("Enter deck name:");
     if (!name) return;
-    const newDeck = { id: crypto.randomUUID(), folder_id: currentFolderId, name: name.trim(), next_session_date: 0, session_enabled: 1, last_modified: Date.now(), deleted: 0 };
-    await db.decks.put(newDeck);
-    await db.changelog.add({ entity_id: newDeck.id, entity_type: 'DECK', operation: 'CREATE', synced: 0 });
+    const newDeck = { 
+        _id: 'deck:' + crypto.randomUUID(), 
+        type: 'deck',
+        folder_id: currentFolderId, 
+        name: name.trim(), 
+        next_session_date: 0, 
+        session_enabled: 1, 
+        last_modified: Date.now(), 
+        deleted: 0 
+    };
+    await db.put(newDeck);
     loadHub();
 });
 
-// --- DELETE FOLDER LOGIC (Recursive) ---
 document.getElementById('delete-folder-btn').addEventListener('click', async () => {
     if (!currentFolderId) return;
-    
     if (!confirm("WARNING: Are you sure you want to delete this folder? ALL sub-folders, decks, and flashcards inside it will be permanently deleted!")) return;
 
     const now = Date.now();
 
-    // Helper function to delete everything inside the folder like a chain reaction
     async function trashFolderContents(targetFolderId) {
-        // 1. Delete the folder itself
-        await db.folders.update(targetFolderId, { deleted: 1, last_modified: now });
-        await db.changelog.add({ entity_id: targetFolderId, entity_type: 'FOLDER', operation: 'DELETE', synced: 0 });
+        const folder = await db.get(targetFolderId);
+        folder.deleted = 1; folder.last_modified = now;
+        await db.put(folder);
 
-        // 2. Find and delete all sub-folders inside it
-        const subFolders = await db.folders.where('parent_id').equals(targetFolderId).toArray();
-        for (const sub of subFolders) {
-            if (sub.deleted === 0) await trashFolderContents(sub.id); 
-        }
+        const subFolders = await db.find({ selector: { type: 'folder', parent_id: targetFolderId, deleted: 0 } });
+        for (const sub of subFolders.docs) await trashFolderContents(sub._id); 
 
-        // 3. Find and delete all decks inside it
-        const decks = await db.decks.where('folder_id').equals(targetFolderId).toArray();
-        for (const deck of decks) {
-            if (deck.deleted === 0) {
-                await db.decks.update(deck.id, { deleted: 1, last_modified: now });
-                await db.changelog.add({ entity_id: deck.id, entity_type: 'DECK', operation: 'DELETE', synced: 0 });
-                
-                // 4. Delete all flashcards inside those decks
-                const cards = await db.flashcards.where('deck_id').equals(deck.id).toArray();
-                for (const card of cards) {
-                    await db.flashcards.update(card.id, { deleted: 1, last_modified: now });
-                    await db.changelog.add({ entity_id: card.id, entity_type: 'FLASHCARD', operation: 'DELETE', synced: 0 });
-                }
+        const decks = await db.find({ selector: { type: 'deck', folder_id: targetFolderId, deleted: 0 } });
+        for (const deck of decks.docs) {
+            deck.deleted = 1; deck.last_modified = now;
+            await db.put(deck);
+            
+            const cards = await db.find({ selector: { type: 'card', deck_id: deck._id, deleted: 0 } });
+            for (const card of cards.docs) {
+                card.deleted = 1; card.last_modified = now;
+                await db.put(card);
             }
         }
     }
 
-    // Trigger the chain reaction!
     await trashFolderContents(currentFolderId);
 
-    // Bump the user back up one level in the breadcrumb trail
     breadcrumbs.pop();
     currentFolderId = breadcrumbs[breadcrumbs.length - 1].id;
-    
-    // Refresh the screen
     loadHub();
 });
 
@@ -291,8 +277,7 @@ const modalQ = document.getElementById('modal-q');
 const modalA = document.getElementById('modal-a');
 let editingCardId = null;
 
-// Toggles the accordion preview panel for a specific card
-function togglePreview(cardId) {
+window.togglePreview = function(cardId) {
     const previewPanel = document.getElementById(`preview-${cardId}`);
     previewPanel.classList.toggle('hidden');
 }
@@ -301,12 +286,11 @@ async function openDeckStudio(deckId, deckName) {
     currentDeckId = deckId;
     document.getElementById('studio-deck-title').innerText = deckName;
     
-    // Check if the deck is paused and update the button UI
-    const deck = await db.decks.get(deckId);
+    const deck = await db.get(deckId);
     const toggleBtn = document.getElementById('toggle-session-btn');
     if (deck.session_enabled === 0) {
         toggleBtn.innerText = "🔕 Paused";
-        toggleBtn.style.background = "#ffeeba"; // Light yellow to indicate it's paused
+        toggleBtn.style.background = "#ffeeba"; 
     } else {
         toggleBtn.innerText = "🔔 Active";
         toggleBtn.style.background = "white";
@@ -316,14 +300,14 @@ async function openDeckStudio(deckId, deckName) {
     switchView('view-studio');
 }
 
-async function loadCardsForCurrentDeck() {
-    const cards = await db.flashcards.where('deck_id').equals(currentDeckId).and(card => card.deleted === 0).toArray();
-    const deck = await db.decks.get(currentDeckId); 
+window.loadCardsForCurrentDeck = async function() {
+    const cardsResult = await db.find({ selector: { type: 'card', deck_id: currentDeckId, deleted: 0 } });
+    const cards = cardsResult.docs;
+    const deck = await db.get(currentDeckId); 
 
     const now = Date.now();
     const nextSessionDate = deck.next_session_date || 0;
     
-    // LOGIC: Is it due? AND have they reviewed it since it became due?
     const isDue = now >= nextSessionDate;
     const hasReviewedSinceDue = deck.last_reviewed_date && deck.last_reviewed_date >= nextSessionDate;
 
@@ -344,7 +328,6 @@ async function loadCardsForCurrentDeck() {
             document.getElementById('stat-next').innerText = daysAway === 1 ? "Tomorrow" : `In ${daysAway} days`;
         }
 
-        // BUTTON UNLOCK LOGIC
         if (isDue && hasReviewedSinceDue && cards.length > 0) {
             sessionDoneBtn.disabled = false;
             sessionDoneBtn.title = "Click to log this session and schedule the next one!";
@@ -368,25 +351,25 @@ async function loadCardsForCurrentDeck() {
         const div = document.createElement('div');
         div.className = 'card-row draggable-card'; 
         div.draggable = true; 
-        div.dataset.id = card.id; 
+        div.dataset.id = card._id; 
         div.style.cssText = "background: white; padding: 15px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #ddd; display: flex; flex-direction: column; cursor: default;";
         
         const summaryText = card.question.replace(/\n/g, ' ');
 
         div.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div style="display: flex; align-items: center; flex-grow: 1; overflow: hidden; cursor: pointer;" onclick="togglePreview('${card.id}')">
+                <div style="display: flex; align-items: center; flex-grow: 1; overflow: hidden; cursor: pointer;" onclick="togglePreview('${card._id}')">
                     <span style="font-size: 1.5rem; color: #ccc; margin-right: 15px; cursor: grab;">☰</span>
                     <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;">
                         <span>🔹 <strong>Q:</strong> ${summaryText}</span>
                     </div>
                 </div>
                 <div style="display: flex; gap: 5px;">
-                    <button class="primary-btn" onclick="editCard('${card.id}')">Edit</button>
-                    <button class="danger-btn" onclick="deleteCard('${card.id}')" style="background: #dc3545; color: white;">Delete</button>
+                    <button class="primary-btn" onclick="editCard('${card._id}')">Edit</button>
+                    <button class="danger-btn" onclick="deleteCard('${card._id}')" style="background: #dc3545; color: white;">Delete</button>
                 </div>
             </div>
-            <div id="preview-${card.id}" class="hidden" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #ccc; background: #fdfdfd;">
+            <div id="preview-${card._id}" class="hidden" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #ccc; background: #fdfdfd;">
                 <p style="white-space: pre-wrap; margin-bottom: 10px;"><strong>Question:</strong><br>${card.question}</p>
                 <p style="white-space: pre-wrap; color: #555;"><strong>Answer:</strong><br>${card.answer}</p>
             </div>
@@ -416,69 +399,58 @@ document.getElementById('modal-save').addEventListener('click', async () => {
 
     const now = Date.now();
     if (editingCardId) {
-        await db.flashcards.update(editingCardId, { question: qText, answer: aText, last_modified: now });
-        await db.changelog.add({ entity_id: editingCardId, entity_type: 'FLASHCARD', operation: 'UPDATE', synced: 0 });
+        const card = await db.get(editingCardId);
+        card.question = qText; card.answer = aText; card.last_modified = now;
+        await db.put(card);
     } else {
-        const newCardId = crypto.randomUUID();
-        await db.flashcards.put({ id: newCardId, deck_id: currentDeckId, question: qText, answer: aText, position: now, last_modified: now, deleted: 0 });
-        await db.changelog.add({ entity_id: newCardId, entity_type: 'FLASHCARD', operation: 'CREATE', synced: 0 });
+        await db.put({ 
+            _id: 'card:' + crypto.randomUUID(), 
+            type: 'card',
+            deck_id: currentDeckId, 
+            question: qText, 
+            answer: aText, 
+            position: now, 
+            last_modified: now, 
+            deleted: 0 
+        });
     }
     cardModal.classList.add('hidden');
     loadCardsForCurrentDeck(); 
 });
 
-async function editCard(cardId) {
-    const card = await db.flashcards.get(cardId);
+window.editCard = async function(cardId) {
+    const card = await db.get(cardId);
     if (!card) return;
-    editingCardId = card.id;
+    editingCardId = card._id;
     document.getElementById('modal-title').innerText = "Edit Card";
     modalQ.value = card.question; modalA.value = card.answer;
     cardModal.classList.remove('hidden');
     modalQ.focus();
 }
 
-async function deleteCard(cardId) {
+window.deleteCard = async function(cardId) {
     if (!confirm("Are you sure you want to delete this card?")) return;
-    const now = Date.now();
-    await db.flashcards.update(cardId, { deleted: 1, last_modified: now });
-    await db.changelog.add({ entity_id: cardId, entity_type: 'FLASHCARD', operation: 'DELETE', synced: 0 });
+    const card = await db.get(cardId);
+    card.deleted = 1; card.last_modified = Date.now();
+    await db.put(card);
     loadCardsForCurrentDeck();
 }
 
-// --- MODAL KEYBOARD SHORTCUTS (Power User Workflow) ---
 document.addEventListener('keydown', (event) => {
-    // ONLY run these shortcuts if the Add/Edit Modal is actually open on the screen
     if (!cardModal.classList.contains('hidden')) {
-
-        // 1. Shift + Enter -> Jump to Answer box
         if (event.shiftKey && event.key === 'Enter' && document.activeElement === modalQ) {
-            event.preventDefault(); // Stops it from creating a new line in the question
-            modalA.focus();
+            event.preventDefault(); modalA.focus();
         }
-
-        // 2. Shift + Backspace -> Jump back to Question box
         if (event.shiftKey && event.key === 'Backspace' && document.activeElement === modalA) {
-            event.preventDefault(); // Stops it from deleting a character
-            modalQ.focus();
+            event.preventDefault(); modalQ.focus();
         }
-
-        // 3. Ctrl + S (or Cmd + S on Mac) -> Save and Close
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-            event.preventDefault(); // Stops the browser from trying to download the HTML file
-            document.getElementById('modal-save').click();
+            event.preventDefault(); document.getElementById('modal-save').click();
         }
-
-        // 4. Ctrl + N (or Cmd + N on Mac) -> Save and immediately start a New Card
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
-            event.preventDefault(); // Stops the browser from opening a new window
-            
-            // First, click save to store the current card in the database
+            event.preventDefault(); 
             document.getElementById('modal-save').click();
-            
-            // Wait 100 milliseconds for the save to finish, then instantly open a new blank modal
-            setTimeout(() => {
-                document.getElementById('add-card-btn').click();
-            }, 100);
+            setTimeout(() => { document.getElementById('add-card-btn').click(); }, 100);
         }
     }
 });
@@ -490,20 +462,26 @@ document.getElementById('btn-rename-deck').addEventListener('click', async () =>
     const currentName = document.getElementById('studio-deck-title').innerText;
     const newName = prompt("Enter new deck name:", currentName);
     if (!newName || newName.trim() === currentName) return;
-    await db.decks.update(currentDeckId, { name: newName.trim(), last_modified: Date.now() });
-    await db.changelog.add({ entity_id: currentDeckId, entity_type: 'DECK', operation: 'UPDATE', synced: 0 });
+    
+    const deck = await db.get(currentDeckId);
+    deck.name = newName.trim(); deck.last_modified = Date.now();
+    await db.put(deck);
+    
     document.getElementById('studio-deck-title').innerText = newName.trim();
 });
 
 document.getElementById('btn-delete-deck').addEventListener('click', async () => {
     if (!confirm("WARNING: Are you sure you want to delete this deck and ALL of its cards?")) return;
     const now = Date.now();
-    await db.decks.update(currentDeckId, { deleted: 1, last_modified: now });
-    await db.changelog.add({ entity_id: currentDeckId, entity_type: 'DECK', operation: 'DELETE', synced: 0 });
-    const cards = await db.flashcards.where('deck_id').equals(currentDeckId).toArray();
-    for (const card of cards) {
-        await db.flashcards.update(card.id, { deleted: 1, last_modified: now });
-        await db.changelog.add({ entity_id: card.id, entity_type: 'FLASHCARD', operation: 'DELETE', synced: 0 });
+    
+    const deck = await db.get(currentDeckId);
+    deck.deleted = 1; deck.last_modified = now;
+    await db.put(deck);
+    
+    const cardsResult = await db.find({ selector: { type: 'card', deck_id: currentDeckId, deleted: 0 } });
+    for (const card of cardsResult.docs) {
+        card.deleted = 1; card.last_modified = now;
+        await db.put(card);
     }
     currentDeckId = null;
     loadHub();
@@ -525,8 +503,8 @@ const flipHint = document.getElementById('flip-hint');
 const focusProgress = document.getElementById('focus-progress');
 
 document.getElementById('start-review-btn').addEventListener('click', async () => {
-    // 1. Fetch ALL cards, regardless of due date!
-    const cards = await db.flashcards.where('deck_id').equals(currentDeckId).and(card => card.deleted === 0).toArray();
+    const cardsResult = await db.find({ selector: { type: 'card', deck_id: currentDeckId, deleted: 0 } });
+    const cards = cardsResult.docs;
     
     if (cards.length === 0) return alert("Add some cards to this deck first!");
 
@@ -563,8 +541,6 @@ activeCard.addEventListener('click', flipCard);
 async function scoreCard(isCorrect) {
     if (!isFlipped) return; 
     if (isCorrect) sessionCorrect++;
-    
-    // Notice: NO MORE DATABASE UPDATES HERE! You can review as much as you want.
     currentReviewIndex++;
     loadNextCardInQueue();
 }
@@ -574,11 +550,18 @@ document.getElementById('btn-wrong').addEventListener('click', (e) => { e.stopPr
 
 async function endSession() {
     const now = Date.now();
-    await db.sessions.add({ deck_id: currentDeckId, date: now, total_cards: reviewQueue.length, correct_answers: sessionCorrect });
+    await db.put({ 
+        _id: 'session:' + crypto.randomUUID(), 
+        type: 'session',
+        deck_id: currentDeckId, 
+        date: now, 
+        total_cards: reviewQueue.length, 
+        correct_answers: sessionCorrect 
+    });
     
-    // 2. Mark the DECK as having been reviewed today!
-    await db.decks.update(currentDeckId, { last_reviewed_date: now, last_modified: now });
-    await db.changelog.add({ entity_id: currentDeckId, entity_type: 'DECK', operation: 'UPDATE', synced: 0 });
+    const deck = await db.get(currentDeckId);
+    deck.last_reviewed_date = now; deck.last_modified = now;
+    await db.put(deck);
 
     alert(`Session Complete! You got ${sessionCorrect} out of ${reviewQueue.length} right.`);
     openDeckStudio(currentDeckId, document.getElementById('studio-deck-title').innerText); 
@@ -632,171 +615,55 @@ async function saveCardOrder() {
     let currentPosition = 0;
     for (const cardDiv of allCardsOnScreen) {
         const cardId = cardDiv.dataset.id;
-        await db.flashcards.update(cardId, { position: currentPosition, last_modified: now });
-        await db.changelog.add({ entity_id: cardId, entity_type: 'FLASHCARD', operation: 'UPDATE', synced: 0 });
+        const card = await db.get(cardId);
+        card.position = currentPosition; card.last_modified = now;
+        await db.put(card);
         currentPosition++; 
     }
 }
 
-// --- 11. XAMPP SYNC API ---
-syncBtn.addEventListener('click', async () => {
-    syncBtn.innerText = "Syncing...";
-    syncBtn.disabled = true;
-
-    try {
-        const unsyncedLogs = await db.changelog.where('synced').equals(0).toArray();
-        const payload = [];
-
-        for (const log of unsyncedLogs) {
-            let recordData = null;
-            if (log.operation !== 'DELETE') {
-                if (log.entity_type === 'FOLDER') recordData = await db.folders.get(log.entity_id);
-                if (log.entity_type === 'DECK') recordData = await db.decks.get(log.entity_id);
-                if (log.entity_type === 'FLASHCARD') recordData = await db.flashcards.get(log.entity_id);
-            }
-            payload.push({ log_id: log.log_id, entity_id: log.entity_id, entity_type: log.entity_type, operation: log.operation, data: recordData });
-        }
-
-        const lastSyncTime = localStorage.getItem('flashcard_last_sync') || 0;
-        const requestBody = { payload: payload, last_sync: parseInt(lastSyncTime) };
-
-        const response = await fetch('https://0lltl173-80.asse.devtunnels.ms/flashcards/sync.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody)
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            localStorage.setItem('flashcard_last_sync', Date.now());
-            for (const log of unsyncedLogs) await db.changelog.update(log.log_id, { synced: 1 });
-
-            const tables = ['folders', 'decks', 'flashcards'];
-            let itemsDownloaded = 0;
-            
-            for (const tableName of tables) {
-                const serverItems = result.server_state[tableName];
-                if (!serverItems || serverItems.length === 0) continue; 
-                
-                const serverItemIds = serverItems.map(item => item.id);
-                const localItemsArray = await db[tableName].where('id').anyOf(serverItemIds).toArray();
-                
-                const localItemsMap = {};
-                localItemsArray.forEach(item => localItemsMap[item.id] = item);
-
-                const itemsToUpdate = [];
-                for (const serverItem of serverItems) {
-                    
-                    // --- THE FIX: Convert PHP Text Strings back into JS Numbers ---
-                    serverItem.deleted = parseInt(serverItem.deleted);
-                    serverItem.last_modified = parseInt(serverItem.last_modified);
-                    
-                    if (tableName === 'decks') {
-                        serverItem.session_enabled = parseInt(serverItem.session_enabled);
-                        serverItem.next_session_date = parseInt(serverItem.next_session_date);
-                        serverItem.srs_step = parseInt(serverItem.srs_step);
-                        serverItem.last_reviewed_date = serverItem.last_reviewed_date ? parseInt(serverItem.last_reviewed_date) : 0;
-                    }
-                    if (tableName === 'flashcards') {
-                        serverItem.position = parseInt(serverItem.position);
-                    }
-                    // --------------------------------------------------------------
-
-                    const localItem = localItemsMap[serverItem.id];
-                    if (!localItem || serverItem.last_modified > localItem.last_modified) {
-                        itemsToUpdate.push(serverItem);
-                    }
-                }
-
-                if (itemsToUpdate.length > 0) {
-                    await db[tableName].bulkPut(itemsToUpdate);
-                    itemsDownloaded += itemsToUpdate.length;
-                }
-            }
-
-            if (unsyncedLogs.length === 0 && itemsDownloaded === 0) {
-                 alert("✅ Everything is already up to date!");
-            } else {
-                 alert(`🎉 Sync Complete! Uploaded ${unsyncedLogs.length} changes and downloaded ${itemsDownloaded} updates.`);
-            }
-            loadHub(); 
-        }
-    } catch (error) {
-        alert("❌ Sync failed. Make sure XAMPP is running!");
-    } finally {
-        syncBtn.innerText = "Sync with Server";
-        syncBtn.disabled = false;
-    }
-});
-
 // Start the app!
 loadHub();
 
-// --- 12. DECK POWER FEATURES (Toggle Session & Bulk Swap) ---
-
-// Feature: Pause/Resume Sessions
+// --- 11. DECK POWER FEATURES ---
 document.getElementById('toggle-session-btn').addEventListener('click', async () => {
-    const deck = await db.decks.get(currentDeckId);
-    
-    // Swap between 1 (Active) and 0 (Paused)
-    const newState = deck.session_enabled === 1 ? 0 : 1;
-
-    await db.decks.update(currentDeckId, {
-        session_enabled: newState,
-        last_modified: Date.now()
-    });
-    
-    // Log it for the XAMPP sync
-    await db.changelog.add({ entity_id: currentDeckId, entity_type: 'DECK', operation: 'UPDATE', synced: 0 });
-
-    // Instantly reopen the studio to refresh the UI
+    const deck = await db.get(currentDeckId);
+    deck.session_enabled = deck.session_enabled === 1 ? 0 : 1;
+    deck.last_modified = Date.now();
+    await db.put(deck);
     openDeckStudio(currentDeckId, deck.name);
 });
 
-// Feature: Swap Questions and Answers Bulk
 document.getElementById('flip-all-btn').addEventListener('click', async () => {
     if (!confirm("Are you sure you want to swap the Questions and Answers for ALL cards in this deck?")) return;
 
-    const cards = await db.flashcards.where('deck_id').equals(currentDeckId).toArray();
+    const cardsResult = await db.find({ selector: { type: 'card', deck_id: currentDeckId } });
     const now = Date.now();
 
-    for (const card of cards) {
-        await db.flashcards.update(card.id, {
-            question: card.answer, // Swap them
-            answer: card.question, // Swap them
-            last_modified: now
-        });
-        await db.changelog.add({ entity_id: card.id, entity_type: 'FLASHCARD', operation: 'UPDATE', synced: 0 });
+    for (const card of cardsResult.docs) {
+        const temp = card.question;
+        card.question = card.answer; 
+        card.answer = temp; 
+        card.last_modified = now;
+        await db.put(card);
     }
-
-    // Refresh the screen
     loadCardsForCurrentDeck();
 });
 
-// --- 13. SESSION DONE LOGIC ---
 document.getElementById('session-done-btn').addEventListener('click', async () => {
-    const deck = await db.decks.get(currentDeckId);
+    const deck = await db.get(currentDeckId);
     const now = Date.now();
     
-    // Figure out what step the deck is on
     let currentStep = deck.srs_step || 0;
-    
-    // Calculate next date based on the interval
     const daysToWait = SRS_INTERVALS[currentStep];
     const nextDate = now + (daysToWait * 24 * 60 * 60 * 1000);
-    
-    // Move up one step for next time
     const nextStep = Math.min(currentStep + 1, SRS_INTERVALS.length - 1);
 
-    await db.decks.update(currentDeckId, {
-        srs_step: nextStep,
-        next_session_date: nextDate,
-        last_modified: now
-    });
+    deck.srs_step = nextStep;
+    deck.next_session_date = nextDate;
+    deck.last_modified = now;
+    await db.put(deck);
     
-    await db.changelog.add({ entity_id: currentDeckId, entity_type: 'DECK', operation: 'UPDATE', synced: 0 });
-
     alert(`✅ Session marked as done! Next review is in ${daysToWait} day(s).`);
-    openDeckStudio(currentDeckId, deck.name); // Refresh UI
+    openDeckStudio(currentDeckId, deck.name); 
 });

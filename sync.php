@@ -21,30 +21,44 @@ $lastSyncTime = isset($requestData['last_sync']) ? (int)$requestData['last_sync'
 
 // --- 1. HANDLE INCOMING (PUSH) ---
 if (!empty($incomingPayload)) {
-    foreach ($incomingPayload as $item) {
-        $id = $item['entity_id'];
-        $type = $item['entity_type'];
-        $op = $item['operation'];
-        $data = $item['data'];
+    
+    // START THE TRANSACTION
+    $conn->begin_transaction();
 
-        if ($op === 'DELETE') {
-            $table = strtolower($type) . "s";
-            $conn->query("UPDATE $table SET deleted = 1, last_modified = " . (time() * 1000) . " WHERE id = '$id'");
-            continue;
+    try {
+        foreach ($incomingPayload as $item) {
+            $id = $item['entity_id'];
+            $type = $item['entity_type'];
+            $op = $item['operation'];
+            $data = $item['data'];
+
+            if ($op === 'DELETE') {
+                $table = strtolower($type) . "s";
+                $conn->query("UPDATE $table SET deleted = 1, last_modified = " . (time() * 1000) . " WHERE id = '$id'");
+                continue;
+            }
+
+            if ($type === 'FOLDER') {
+                $stmt = $conn->prepare("REPLACE INTO folders (id, parent_id, name, last_modified, deleted) VALUES (?, ?, ?, ?, ?)");
+                $stmt->bind_param("sssii", $data['id'], $data['parent_id'], $data['name'], $data['last_modified'], $data['deleted']);
+            } else if ($type === 'DECK') {
+                $stmt = $conn->prepare("REPLACE INTO decks (id, folder_id, name, next_session_date, srs_step, last_reviewed_date, session_enabled, last_modified, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("sssiisiii", $data['id'], $data['folder_id'], $data['name'], $data['next_session_date'], $data['srs_step'], $data['last_reviewed_date'], $data['session_enabled'], $data['last_modified'], $data['deleted']);
+            } else if ($type === 'FLASHCARD') {
+                $stmt = $conn->prepare("REPLACE INTO flashcards (id, deck_id, question, answer, position, last_modified, deleted) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("ssssiii", $data['id'], $data['deck_id'], $data['question'], $data['answer'], $data['position'], $data['last_modified'], $data['deleted']);
+            }
+
+            if (isset($stmt)) $stmt->execute();
         }
-
-        if ($type === 'FOLDER') {
-            $stmt = $conn->prepare("REPLACE INTO folders (id, parent_id, name, last_modified, deleted) VALUES (?, ?, ?, ?, ?)");
-            $stmt->bind_param("sssii", $data['id'], $data['parent_id'], $data['name'], $data['last_modified'], $data['deleted']);
-        } else if ($type === 'DECK') {
-            $stmt = $conn->prepare("REPLACE INTO decks (id, folder_id, name, next_session_date, srs_step, last_reviewed_date, session_enabled, last_modified, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sssiisiii", $data['id'], $data['folder_id'], $data['name'], $data['next_session_date'], $data['srs_step'], $data['last_reviewed_date'], $data['session_enabled'], $data['last_modified'], $data['deleted']);
-        } else if ($type === 'FLASHCARD') {
-            $stmt = $conn->prepare("REPLACE INTO flashcards (id, deck_id, question, answer, position, last_modified, deleted) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("ssssiii", $data['id'], $data['deck_id'], $data['question'], $data['answer'], $data['position'], $data['last_modified'], $data['deleted']);
-        }
-
-        if (isset($stmt)) $stmt->execute();
+        
+        // EXECUTE ALL QUERIES AT ONCE
+        $conn->commit();
+        
+    } catch (Exception $e) {
+        // IF ANY SINGLE QUERY FAILS, CANCEL EVERYTHING SO DATA ISNT CORRUPTED
+        $conn->rollback();
+        die(json_encode(['success' => false, 'error' => 'Sync failed: ' . $e->getMessage()]));
     }
 }
 

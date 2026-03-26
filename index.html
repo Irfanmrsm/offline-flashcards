@@ -1,15 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Flashcards SRS</title>
-    
-    <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="styles/main.css">
-    <script src="src/dexie.js"></script>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pouchdb-find@8.0.1/dist/pouchdb.find.min.js"></script>
+</head>
 </head>
 <body>
+    <div id="auth-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px; text-align: center;">
+            <h2>Login to Sync</h2>
+            <p style="margin-bottom: 20px; color: #666;">Create an account or sign in to save your flashcards to the cloud.</p>
+            
+            <div class="input-group">
+                <input type="email" id="auth-email" placeholder="Email Address" required>
+            </div>
+            <div class="input-group">
+                <input type="password" id="auth-password" placeholder="Password" required>
+            </div>
+            
+            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                <button id="btn-signup" class="primary-btn" style="background: #28a745;">Sign Up</button>
+                <button id="btn-login" class="primary-btn">Log In</button>
+            </div>
+            <p id="auth-error" style="color: red; margin-top: 15px; font-size: 0.9rem;"></p>
+        </div>
+    </div>
     <header class="top-nav">
         <div class="nav-left">
             <h2 id="breadcrumb-trail">
@@ -120,7 +136,7 @@
             </div>
         </div>
     </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="src/database.js"></script>
     <script src="src/app.js"></script>
 </body>
