@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Flashcards App</title>
+
+  <link rel="stylesheet" href="main.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#4CAF50">
+</head>
+
+<body>
+
+<h1>Flashcards</h1>
+
+<div id="connection-bar">
+  <button onclick="connectServer()">Connect</button>
+  <span id="connection-status">🔴 Offline</span>
+
+  <button id="sync-btn" onclick="sync()" disabled>Sync</button>
+</div>
+
+<br>
+
+<button onclick="addCard()">Add Card</button>
+
+<div id="cards"></div>
+
+<script src="dexie.js"></script>
+<script src="database.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
